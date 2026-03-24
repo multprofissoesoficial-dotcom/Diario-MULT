@@ -18,7 +18,7 @@ import {
 } from "firebase/auth";
 import { initializeApp, deleteApp } from "firebase/app";
 import { db, auth } from "../firebase";
-import { handleFirestoreError, OperationType } from "../lib/utils";
+import { handleFirestoreError, OperationType, cn } from "../lib/utils";
 import firebaseConfig from "../../firebase-applet-config.json";
 import { UserProfile, Franquia, Mission } from "../types";
 import { ROLES_LABELS, RANKS } from "../constants";
@@ -41,7 +41,8 @@ import {
   Rocket,
   Upload,
   AlertCircle,
-  Trash2
+  Trash2,
+  Clock
 } from "lucide-react";
 
 export default function AdminDashboard({ profile }: { profile: UserProfile }) {
@@ -59,6 +60,9 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [usersPerPage] = useState(50);
+  const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [pendingOnly, setPendingOnly] = useState(false);
+  const [pendingMissions, setPendingMissions] = useState<Mission[]>([]);
   
   // Form states
   const [newUser, setNewUser] = useState({
@@ -101,15 +105,38 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     return () => unsubUsers();
   }, [selectedFranquia, profile.franquiaId, profile.role]);
 
+  useEffect(() => {
+    // Listen to Pending Missions
+    let q = query(collection(db, "missions"), where("status", "==", "pending"));
+    
+    if (profile.role !== "master") {
+      q = query(collection(db, "missions"), where("status", "==", "pending"), where("franquiaId", "==", profile.franquiaId));
+    } else if (selectedFranquia !== "all") {
+      q = query(collection(db, "missions"), where("status", "==", "pending"), where("franquiaId", "==", selectedFranquia));
+    }
+
+    const unsubMissions = onSnapshot(q, (snap) => {
+      setPendingMissions(snap.docs.map(d => ({ id: d.id, ...d.data() } as Mission)));
+    });
+
+    return () => unsubMissions();
+  }, [selectedFranquia, profile.franquiaId, profile.role]);
+
   const totalAlunos = users.filter(u => u.role === "aluno").length;
   const totalProfessores = users.filter(u => u.role === "professor").length;
   const totalCoordenadores = users.filter(u => u.role === "coordenador").length;
 
-  const filteredUsers = users.filter(u => 
-    u.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (u.codigo && u.codigo.includes(searchQuery))
-  );
+  const filteredUsers = users.filter(u => {
+    const matchesSearch = u.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (u.codigo && u.codigo.includes(searchQuery));
+    
+    const matchesRole = roleFilter === "all" || u.role === roleFilter;
+    
+    const matchesPending = !pendingOnly || pendingMissions.some(m => m.studentId === u.uid);
+    
+    return matchesSearch && matchesRole && matchesPending;
+  });
 
   // Pagination logic
   const indexOfLastUser = currentPage * usersPerPage;
@@ -482,8 +509,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       </header>
 
       {/* Stats & Controls */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="lg:col-span-4 glass-card p-5 sm:p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+        <div className="lg:col-span-5 glass-card p-5 sm:p-6 flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6 w-full md:w-auto">
             <div className="flex items-center gap-3 shrink-0">
               <Filter className="w-4 h-4 text-gray-500" />
@@ -536,7 +563,17 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           </div>
         </div>
 
-        <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
+        <button 
+          onClick={() => {
+            setRoleFilter("aluno");
+            setPendingOnly(false);
+            setCurrentPage(1);
+          }}
+          className={cn(
+            "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
+            roleFilter === "aluno" && !pendingOnly ? "border-neon-blue bg-neon-blue/10" : "hover:bg-white/5"
+          )}
+        >
           <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue neon-glow-blue border border-neon-blue/20">
             <Users className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
@@ -544,9 +581,19 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Alunos</p>
             <p className="text-xl sm:text-2xl font-black">{totalAlunos}</p>
           </div>
-        </div>
+        </button>
 
-        <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
+        <button 
+          onClick={() => {
+            setRoleFilter("professor");
+            setPendingOnly(false);
+            setCurrentPage(1);
+          }}
+          className={cn(
+            "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
+            roleFilter === "professor" && !pendingOnly ? "border-mult-orange bg-mult-orange/10" : "hover:bg-white/5"
+          )}
+        >
           <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-mult-orange/20 flex items-center justify-center text-mult-orange neon-glow-orange border border-mult-orange/20">
             <Rocket className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
@@ -554,9 +601,19 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Professores</p>
             <p className="text-xl sm:text-2xl font-black">{totalProfessores}</p>
           </div>
-        </div>
+        </button>
 
-        <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
+        <button 
+          onClick={() => {
+            setRoleFilter("coordenador");
+            setPendingOnly(false);
+            setCurrentPage(1);
+          }}
+          className={cn(
+            "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
+            roleFilter === "coordenador" && !pendingOnly ? "border-purple-500 bg-purple-500/10" : "hover:bg-white/5"
+          )}
+        >
           <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-purple-500/20 flex items-center justify-center text-purple-400 neon-glow-purple border border-purple-500/20">
             <Building2 className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
@@ -564,9 +621,39 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Coordenadores</p>
             <p className="text-xl sm:text-2xl font-black">{totalCoordenadores}</p>
           </div>
-        </div>
+        </button>
 
-        <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
+        <button 
+          onClick={() => {
+            setRoleFilter("all");
+            setPendingOnly(true);
+            setCurrentPage(1);
+          }}
+          className={cn(
+            "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
+            pendingOnly ? "border-yellow-500 bg-yellow-500/10" : "hover:bg-white/5"
+          )}
+        >
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-yellow-500/20 flex items-center justify-center text-yellow-400 neon-glow-yellow border border-yellow-500/20">
+            <Clock className="w-5 h-5 sm:w-6 sm:h-6" />
+          </div>
+          <div>
+            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Pendentes</p>
+            <p className="text-xl sm:text-2xl font-black">{pendingMissions.length}</p>
+          </div>
+        </button>
+
+        <button 
+          onClick={() => {
+            setRoleFilter("all");
+            setPendingOnly(false);
+            setCurrentPage(1);
+          }}
+          className={cn(
+            "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
+            roleFilter === "all" && !pendingOnly ? "border-white bg-white/5" : "hover:bg-white/5"
+          )}
+        >
           <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-white/5 flex items-center justify-center text-white border border-white/10">
             <Users className="w-5 h-5 sm:w-6 sm:h-6" />
           </div>
@@ -574,13 +661,20 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Total Geral</p>
             <p className="text-xl sm:text-2xl font-black">{users.length}</p>
           </div>
-        </div>
+        </button>
       </div>
 
       {/* Students Table */}
       <div className="glass-card overflow-hidden">
         <div className="p-6 border-b border-white/5 bg-white/5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <h3 className="text-sm font-black uppercase tracking-widest text-gray-400">Relatório de Desempenho</h3>
+          <h3 className="text-sm font-black uppercase tracking-widest text-gray-400 flex items-center gap-2">
+            Relatório de Desempenho
+            {(roleFilter !== "all" || pendingOnly) && (
+              <span className="px-2 py-0.5 rounded-full bg-neon-blue/10 text-neon-blue text-[9px] border border-neon-blue/20">
+                Filtro Ativo: {pendingOnly ? "Pendentes" : (ROLES_LABELS[roleFilter as keyof typeof ROLES_LABELS] || "Todos")}
+              </span>
+            )}
+          </h3>
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
             <input 
@@ -609,15 +703,28 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             <tbody className="divide-y divide-white/5">
               {currentUsers.map((userItem) => {
                 const rank = RANKS.reduce((prev, curr) => (userItem.xp >= curr.minXP ? curr : prev), RANKS[0]);
+                const hasPending = pendingMissions.some(m => m.studentId === userItem.uid);
                 return (
                   <tr key={userItem.uid} className="hover:bg-white/5 transition-colors group">
                     <td className="px-4 sm:px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-white/5 flex items-center justify-center text-gray-500 group-hover:text-neon-blue transition-colors shrink-0">
-                          <Users className="w-4 h-4 sm:w-5 sm:h-5" />
+                        <div className="relative">
+                          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-white/5 flex items-center justify-center text-gray-500 group-hover:text-neon-blue transition-colors shrink-0">
+                            <Users className="w-4 h-4 sm:w-5 sm:h-5" />
+                          </div>
+                          {hasPending && (
+                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-500 rounded-full border-2 border-cockpit-bg animate-pulse" title="Atividades Pendentes" />
+                          )}
                         </div>
                         <div className="min-w-0">
-                          <p className="font-bold text-xs sm:text-sm truncate">{userItem.displayName}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-bold text-xs sm:text-sm truncate">{userItem.displayName}</p>
+                            {hasPending && (
+                              <span className="px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-500 text-[8px] font-black uppercase tracking-tighter border border-yellow-500/20">
+                                Pendente
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[9px] sm:text-[10px] text-gray-600 font-mono truncate">{userItem.email || userItem.codigo}</p>
                         </div>
                       </div>
