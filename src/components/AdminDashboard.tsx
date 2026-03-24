@@ -181,8 +181,31 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
         if (!nome || !email || !unidadeId) continue;
 
+        // Check if user already exists in Firestore by email
+        const existingQuery = query(collection(db, "users"), where("email", "==", email));
+        const existingSnap = await getDocs(existingQuery);
+        if (!existingSnap.empty) {
+          console.log(`Usuário ${email} já existe, pulando...`);
+          setImportProgress(prev => ({ ...prev, current: i + 1 }));
+          continue;
+        }
+
         try {
-          const userCred = await createUserWithEmailAndPassword(secondaryAuth, email, senha);
+          // Add a small delay to avoid Firebase Auth rate limits (too-many-requests)
+          await new Promise(resolve => setTimeout(resolve, 600));
+
+          let userCred;
+          try {
+            userCred = await createUserWithEmailAndPassword(secondaryAuth, email, senha);
+          } catch (authErr: any) {
+            if (authErr.code === "auth/too-many-requests") {
+              console.log("Muitas requisições, aguardando 5 segundos para tentar novamente...");
+              await new Promise(resolve => setTimeout(resolve, 5000));
+              userCred = await createUserWithEmailAndPassword(secondaryAuth, email, senha);
+            } else {
+              throw authErr;
+            }
+          }
           
           await setDoc(doc(db, "users", userCred.user.uid), {
             uid: userCred.user.uid,
@@ -201,23 +224,27 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           
           setImportProgress(prev => ({ ...prev, current: i + 1 }));
         } catch (err: any) {
-          console.error(`Erro ao importar ${email}:`, err.message);
-          // If error is "email already in use", we might want to skip or update
-          // For now, we just continue to the next one
+          if (err.code === "auth/email-already-in-use") {
+            console.log(`Email ${email} já está em uso no Auth. Se o usuário não estiver no banco, você precisará removê-lo manualmente no console do Firebase.`);
+          } else {
+            console.error(`Erro ao importar ${email}:`, err.message);
+          }
+          setImportProgress(prev => ({ ...prev, current: i + 1 }));
         }
       }
 
       // Cleanup the secondary app after all imports are done
       await deleteApp(secondaryApp);
 
-      setSuccessMsg(`${rows.length} alunos processados com sucesso!`);
+      setSuccessMsg(`${rows.length} alunos processados! Se houveram erros, verifique o console.`);
       setImportText("");
       setTimeout(() => {
         setShowImportModal(false);
         setImportProgress({ current: 0, total: 0 });
       }, 3000);
     } catch (err: any) {
-      alert("Erro na importação: " + err.message);
+      console.error("Erro na importação:", err);
+      alert("Erro na importação: " + (err.message || "Erro desconhecido"));
     } finally {
       setLoading(false);
     }
@@ -605,7 +632,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
               {loading && (
                 <div className="space-y-2">
                   <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-gray-500">
-                    <span>Processando Alunos...</span>
+                    <span>Processando Alunos (Aguarde o delay de segurança)...</span>
                     <span>{importProgress.current} / {importProgress.total}</span>
                   </div>
                   <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
