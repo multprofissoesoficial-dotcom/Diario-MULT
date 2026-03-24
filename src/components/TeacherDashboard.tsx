@@ -15,18 +15,9 @@ import { db } from "../firebase";
 import { Mission, UserProfile } from "../types";
 import { XP_PER_MISSION, XP_BONUS } from "../constants";
 import { motion, AnimatePresence } from "motion/react";
-import { 
-  CheckCircle, 
-  Zap, 
-  Clock, 
-  User as UserIcon, 
-  FileText, 
-  Search,
-  Filter,
-  LogOut,
-  Rocket
-} from "lucide-react";
+import { CheckCircle, Zap, Clock, User as UserIcon, FileText, Search, Filter, LogOut, Rocket } from "lucide-react";
 import { auth } from "../firebase";
+import { handleFirestoreError, OperationType } from "../lib/utils";
 
 export default function TeacherDashboard({ profile }: { profile: UserProfile }) {
   const [missions, setMissions] = useState<Mission[]>([]);
@@ -70,7 +61,7 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
       await setDoc(doc(db, "users", showEditStudent.uid), showEditStudent, { merge: true });
       setShowEditStudent(null);
     } catch (err) {
-      console.error(err);
+      handleFirestoreError(err, OperationType.WRITE, `users/${showEditStudent.uid}`);
     } finally {
       setLoading(false);
     }
@@ -92,7 +83,7 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
         })
       ]);
     } catch (err) {
-      console.error(err);
+      handleFirestoreError(err, OperationType.WRITE, `missions/${mission.id} & users/${mission.studentId}`);
     } finally {
       setLoading(false);
     }

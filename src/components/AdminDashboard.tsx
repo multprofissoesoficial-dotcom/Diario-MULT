@@ -18,6 +18,7 @@ import {
 } from "firebase/auth";
 import { initializeApp, deleteApp } from "firebase/app";
 import { db, auth } from "../firebase";
+import { handleFirestoreError, OperationType } from "../lib/utils";
 import firebaseConfig from "../../firebase-applet-config.json";
 import { UserProfile, Franquia, Mission } from "../types";
 import { ROLES_LABELS, RANKS } from "../constants";
@@ -405,7 +406,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       setSuccessMsg("Usuário excluído com sucesso!");
       setTimeout(() => setSuccessMsg(""), 3000);
     } catch (err: any) {
-      alert("Erro ao excluir usuário: " + err.message);
+      handleFirestoreError(err, OperationType.DELETE, `users/${userId}`);
     }
   };
 
@@ -422,7 +423,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         setSuccessMsg("");
       }, 2000);
     } catch (err: any) {
-      alert("Erro ao atualizar usuário: " + err.message);
+      handleFirestoreError(err, OperationType.WRITE, `users/${showEditUser.uid}`);
     } finally {
       setLoading(false);
     }

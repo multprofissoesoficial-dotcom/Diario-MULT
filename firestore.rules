@@ -13,7 +13,8 @@ service cloud.firestore {
     function isMaster() {
       return isAuthenticated() && (
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'master') ||
-        request.auth.token.email == "faustodv@gmail.com"
+        request.auth.token.email == "faustodv@gmail.com" ||
+        request.auth.token.email == "multprofissoesoficial@gmail.com"
       );
     }
 
@@ -44,7 +45,10 @@ service cloud.firestore {
         (getUserData().role == 'professor' && getUserData().franquiaId == resource.data.franquiaId)
       );
       allow create: if isMaster() || (isAuthenticated() && getUserData().role == 'coordenador' && request.resource.data.franquiaId == getUserData().franquiaId);
-      allow update: if isMaster() || (isAuthenticated() && getUserData().role == 'coordenador' && resource.data.franquiaId == getUserData().franquiaId) || isOwner(userId);
+      allow update: if isMaster() || 
+                    (isAuthenticated() && getUserData().role == 'coordenador' && resource.data.franquiaId == getUserData().franquiaId) ||
+                    (isAuthenticated() && getUserData().role == 'professor' && resource.data.franquiaId == getUserData().franquiaId) ||
+                    isOwner(userId);
       allow delete: if isMaster();
     }
 
