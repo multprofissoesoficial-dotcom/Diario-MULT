@@ -11,6 +11,7 @@ export interface UserProfile {
   uid: string;
   displayName: string;
   email: string;
+  codigo?: string; // Registration code for students
   role: UserRole;
   franquiaId?: string; // Master doesn't necessarily have one
   xp: number;

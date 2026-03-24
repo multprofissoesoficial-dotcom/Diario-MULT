@@ -45,6 +45,7 @@ service cloud.firestore {
       );
       allow create: if isMaster() || (isAuthenticated() && getUserData().role == 'coordenador' && request.resource.data.franquiaId == getUserData().franquiaId);
       allow update: if isMaster() || (isAuthenticated() && getUserData().role == 'coordenador' && resource.data.franquiaId == getUserData().franquiaId) || isOwner(userId);
+      allow delete: if isMaster();
     }
 
     // Missões (Diários)

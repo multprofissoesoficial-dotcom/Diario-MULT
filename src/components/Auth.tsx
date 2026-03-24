@@ -5,7 +5,7 @@ import { motion } from "motion/react";
 import { Rocket, Mail, Lock, ShieldCheck } from "lucide-react";
 
 export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -16,9 +16,14 @@ export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
     setLoading(true);
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      let finalEmail = identifier;
+      // If identifier is numeric, assume it's a student code
+      if (/^\d+$/.test(identifier)) {
+        finalEmail = `${identifier}@mult.com.br`;
+      }
+      await signInWithEmailAndPassword(auth, finalEmail, password);
     } catch (err: any) {
-      setError("Credenciais inválidas. Verifique seu e-mail e senha.");
+      setError("Credenciais inválidas. Verifique seus dados e senha.");
     } finally {
       setLoading(false);
     }
@@ -46,16 +51,16 @@ export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">E-mail de Acesso</label>
+            <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">E-mail ou Código</label>
             <div className="relative group">
               <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-neon-blue transition-colors" />
               <input
-                type="email"
+                type="text"
                 required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:outline-none focus:border-neon-blue focus:bg-white/10 transition-all text-sm"
-                placeholder="seu@email.com"
+                placeholder="E-mail ou Matrícula"
               />
             </div>
           </div>
@@ -95,12 +100,9 @@ export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
         </form>
 
         <div className="mt-10 text-center">
-          <button
-            onClick={onSeedClick}
-            className="text-gray-600 text-[10px] uppercase tracking-widest hover:text-neon-blue transition-colors flex items-center justify-center gap-2 mx-auto"
-          >
-            <ShieldCheck className="w-3 h-3" /> Primeiro Acesso Mestre
-          </button>
+          <p className="text-gray-600 text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 mx-auto">
+            <ShieldCheck className="w-3 h-3" /> Acesso Restrito MULT Profissões
+          </p>
         </div>
       </motion.div>
     </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { collection, addDoc, query, where, orderBy, onSnapshot, doc, updateDoc, arrayUnion } from "firebase/firestore";
 import { db } from "../firebase";
-import { UserProfile, Mission } from "../types";
+import { UserProfile, Mission, Badge } from "../types";
 import { MODULES, CLASSES, RANKS, BADGES } from "../constants";
 import { motion, AnimatePresence } from "motion/react";
 import { 
@@ -38,6 +38,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
   const [missions, setMissions] = useState<Mission[]>([]);
   const [loading, setLoading] = useState(false);
   const [aiFeedback, setAiFeedback] = useState<string | null>(null);
+  const [newBadge, setNewBadge] = useState<Badge | null>(null);
 
   useEffect(() => {
     const q = query(
@@ -71,6 +72,10 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
       await updateDoc(userRef, {
         unlockedBadges: arrayUnion(...newBadges.map(b => b.id))
       });
+      
+      // Show the first new badge in a special modal
+      setNewBadge(newBadges[0]);
+      fireConfetti(); // Special confetti for medals
     }
   };
 
@@ -122,20 +127,59 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
 
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-8 space-y-8">
+      <AnimatePresence>
+        {newBadge && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+            <motion.div 
+              initial={{ scale: 0, rotate: -180 }}
+              animate={{ scale: 1, rotate: 0 }}
+              exit={{ scale: 0, rotate: 180 }}
+              className="glass-card p-12 text-center space-y-8 max-w-sm relative overflow-hidden"
+            >
+              <div className="absolute inset-0 bg-gradient-to-b from-mult-orange/20 to-transparent pointer-events-none" />
+              
+              <motion.div 
+                animate={{ 
+                  scale: [1, 1.2, 1],
+                  rotate: [0, 5, -5, 0]
+                }}
+                transition={{ repeat: Infinity, duration: 3 }}
+                className="w-32 h-32 bg-mult-orange/20 rounded-full flex items-center justify-center mx-auto neon-glow-orange border-2 border-mult-orange/50"
+              >
+                {React.createElement(iconMap[newBadge.icon], { className: "w-16 h-16 text-mult-orange" })}
+              </motion.div>
+
+              <div className="space-y-2">
+                <h2 className="text-3xl font-black tracking-tighter text-white">NOVA <span className="text-mult-orange">MEDALHA!</span></h2>
+                <p className="text-xl font-bold text-neon-blue uppercase tracking-widest">{newBadge.name}</p>
+                <p className="text-gray-400 text-sm italic">"{newBadge.description}"</p>
+              </div>
+
+              <button 
+                onClick={() => setNewBadge(null)}
+                className="w-full bg-mult-orange text-white font-black py-4 rounded-xl transition-all neon-glow-orange uppercase tracking-widest text-xs"
+              >
+                RECEBER RECOMPENSA
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-mult-orange/20 rounded-xl flex items-center justify-center neon-glow-orange border border-mult-orange/30">
-            <Rocket className="text-mult-orange w-6 h-6" />
+          <div className="w-10 h-10 sm:w-12 sm:h-12 bg-mult-orange/20 rounded-xl flex items-center justify-center neon-glow-orange border border-mult-orange/30">
+            <Rocket className="text-mult-orange w-5 h-5 sm:w-6 sm:h-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-black tracking-tighter leading-none">MULT <span className="text-mult-orange">PROFISSÕES</span></h1>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mt-1">Cockpit v2.0 • Piloto {profile.displayName.split(' ')[0]}</p>
+            <h1 className="text-xl sm:text-2xl font-black tracking-tighter leading-none">MULT <span className="text-mult-orange">PROFISSÕES</span></h1>
+            <p className="text-[9px] sm:text-[10px] font-black text-gray-500 uppercase tracking-widest mt-1">Cockpit v2.0 • Piloto {profile.displayName.split(' ')[0]}</p>
           </div>
         </div>
         <button 
           onClick={() => auth.signOut()}
-          className="p-2 rounded-full hover:bg-white/10 transition-colors text-gray-400"
+          className="absolute top-4 right-4 sm:relative sm:top-0 sm:right-0 p-2 rounded-full hover:bg-white/10 transition-colors text-gray-400"
         >
           <LogOut className="w-5 h-5" />
         </button>
@@ -187,7 +231,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
             <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-4 flex items-center gap-2">
               <Trophy className="w-4 h-4 text-mult-orange" /> Medalhas Conquistadas
             </h3>
-            <div className="grid grid-cols-5 gap-4">
+            <div className="grid grid-cols-4 sm:grid-cols-5 gap-3 sm:gap-4">
               {BADGES.map((badge) => {
                 const Icon = iconMap[badge.icon];
                 const isUnlocked = profile.unlockedBadges.includes(badge.id);
@@ -198,11 +242,11 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
                     className={cn(
                       "aspect-square rounded-xl flex items-center justify-center transition-all border",
                       isUnlocked 
-                        ? "bg-mult-orange/20 border-mult-orange text-mult-orange neon-glow-orange scale-110" 
+                        ? "bg-mult-orange/20 border-mult-orange text-mult-orange neon-glow-orange scale-105 sm:scale-110" 
                         : "bg-white/5 border-white/10 text-gray-600 grayscale opacity-50"
                     )}
                   >
-                    <Icon className="w-6 h-6" />
+                    <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
                   </div>
                 );
               })}
@@ -215,14 +259,14 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="glass-card p-8 relative"
+            className="glass-card p-5 sm:p-8 relative"
           >
             <div className="absolute top-0 right-0 p-4">
-              <Zap className="text-mult-orange w-6 h-6 animate-pulse" />
+              <Zap className="text-mult-orange w-5 h-5 sm:w-6 sm:h-6 animate-pulse" />
             </div>
             
-            <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
-              <Send className="text-neon-blue w-6 h-6" /> MISSION CONTROL
+            <h2 className="text-xl sm:text-2xl font-bold mb-6 flex items-center gap-2">
+              <Send className="text-neon-blue w-5 h-5 sm:w-6 sm:h-6" /> MISSION CONTROL
             </h2>
 
             <form onSubmit={handleSubmit} className="space-y-6">
@@ -301,21 +345,21 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
                   animate={{ opacity: 1, y: 0 }}
                   className="glass-card p-4 flex items-center justify-between group hover:border-neon-blue/30 transition-all"
                 >
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3 sm:gap-4">
                     <div className={cn(
-                      "w-10 h-10 rounded-lg flex items-center justify-center",
+                      "w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center shrink-0",
                       mission.status === "pending" ? "bg-gray-500/20 text-gray-500" : "bg-neon-blue/20 text-neon-blue"
                     )}>
-                      {mission.status === "pending" ? <Clock className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
+                      {mission.status === "pending" ? <Clock className="w-4 h-4 sm:w-5 sm:h-5" /> : <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5" />}
                     </div>
-                    <div>
-                      <h4 className="font-bold text-sm">{mission.module} - Aula {mission.classNum}</h4>
-                      <p className="text-xs text-gray-500">{new Date(mission.createdAt).toLocaleDateString()}</p>
+                    <div className="min-w-0">
+                      <h4 className="font-bold text-xs sm:text-sm truncate">{mission.module} - Aula {mission.classNum}</h4>
+                      <p className="text-[10px] sm:text-xs text-gray-500">{new Date(mission.createdAt).toLocaleDateString()}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2 sm:gap-4 shrink-0">
                     {mission.status !== "pending" && (
-                      <span className="text-xs font-bold text-neon-blue bg-neon-blue/10 px-2 py-1 rounded">
+                      <span className="text-[10px] sm:text-xs font-bold text-neon-blue bg-neon-blue/10 px-2 py-1 rounded">
                         +{mission.xpAwarded} XP
                       </span>
                     )}

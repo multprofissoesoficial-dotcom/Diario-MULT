@@ -10,7 +10,6 @@ import { useState } from "react";
 
 export default function App() {
   const { user, profile, loading } = useAuth();
-  const [view, setView] = useState<"app" | "seed">("app");
 
   if (loading) {
     return (
@@ -32,20 +31,6 @@ export default function App() {
     );
   }
 
-  if (view === "seed") {
-    return (
-      <div className="relative">
-        <SeedMaster />
-        <button 
-          onClick={() => setView("app")}
-          className="fixed bottom-4 right-4 text-gray-600 text-[10px] uppercase tracking-widest hover:text-white transition-colors"
-        >
-          Voltar para Login
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-cockpit-bg selection:bg-neon-blue selection:text-black">
       <AnimatePresence mode="wait">
@@ -56,7 +41,7 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <Auth onSeedClick={() => setView("seed")} />
+            <Auth onSeedClick={() => {}} />
           </motion.div>
         ) : profile ? (
           <motion.div 
