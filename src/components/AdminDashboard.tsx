@@ -13,6 +13,7 @@ import {
 import { 
   getAuth, 
   createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword,
   signOut 
 } from "firebase/auth";
 import { initializeApp, deleteApp } from "firebase/app";
@@ -204,15 +205,36 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         const codigo = row["Código"] || row["codigo"] || row["Matrícula"] || row["matricula"];
         const email = row["Email"] || row["email"] || (codigo ? `${codigo}@mult.com.br` : "");
         const senha = row["Senha Temporária"] || row["senha"] || "nome123";
-        const unidadeId = row["Unidade"] || row["unidade"];
+        const unidadeInput = row["Unidade"] || row["unidade"];
 
-        if (!nome || !email || !unidadeId) continue;
+        if (!nome || !email || !unidadeInput) {
+          console.warn(`Linha ${i + 1} ignorada: Dados incompletos.`, { nome, email, unidadeInput });
+          setImportProgress(prev => ({ ...prev, current: i + 1 }));
+          continue;
+        }
+
+        // Try to find the franchise ID by name or city if the input isn't already a valid ID
+        let finalUnidadeId = unidadeInput;
+        const normalize = (s: string) => s.toLowerCase().replace(/[-_]/g, " ").trim();
+        const normalizedInput = normalize(unidadeInput);
+        
+        const foundFranquia = franquias.find(f => 
+          f.id === unidadeInput || 
+          normalize(f.nome) === normalizedInput ||
+          normalize(f.cidade) === normalizedInput
+        );
+        
+        if (foundFranquia) {
+          finalUnidadeId = foundFranquia.id;
+        } else {
+          console.warn(`Aviso: Unidade "${unidadeInput}" não encontrada no cadastro. Usando valor original.`);
+        }
 
         // Check if user already exists in Firestore by email
         const existingQuery = query(collection(db, "users"), where("email", "==", email));
         const existingSnap = await getDocs(existingQuery);
         if (!existingSnap.empty) {
-          console.log(`Usuário ${email} já existe, pulando...`);
+          console.log(`Usuário ${email} já existe no Firestore, pulando...`);
           setImportProgress(prev => ({ ...prev, current: i + 1 }));
           continue;
         }
@@ -229,6 +251,18 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
               console.log("Muitas requisições, aguardando 5 segundos para tentar novamente...");
               await new Promise(resolve => setTimeout(resolve, 5000));
               userCred = await createUserWithEmailAndPassword(secondaryAuth, email, senha);
+            } else if (authErr.code === "auth/email-already-in-use") {
+              // This is a special case: user exists in Auth but not in Firestore
+              // We'll try to sign in with the provided password to get the UID
+              console.log(`Email ${email} já existe no Auth. Tentando recuperar UID...`);
+              try {
+                userCred = await signInWithEmailAndPassword(secondaryAuth, email, senha);
+                console.log(`UID recuperado para ${email}: ${userCred.user.uid}`);
+              } catch (loginErr: any) {
+                console.warn(`Não foi possível recuperar UID para ${email}: Senha incorreta ou erro no Auth.`, loginErr.message);
+                setImportProgress(prev => ({ ...prev, current: i + 1 }));
+                continue;
+              }
             } else {
               throw authErr;
             }
@@ -240,7 +274,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             email: email,
             codigo: codigo || "",
             role: "aluno",
-            franquiaId: unidadeId,
+            franquiaId: finalUnidadeId,
             xp: 0,
             unlockedBadges: [],
             createdAt: new Date().toISOString()
@@ -251,11 +285,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           
           setImportProgress(prev => ({ ...prev, current: i + 1 }));
         } catch (err: any) {
-          if (err.code === "auth/email-already-in-use") {
-            console.log(`Email ${email} já está em uso no Auth. Se o usuário não estiver no banco, você precisará removê-lo manualmente no console do Firebase.`);
-          } else {
-            console.error(`Erro ao importar ${email}:`, err.message);
-          }
+          console.error(`Erro crítico ao importar ${email}:`, err);
           setImportProgress(prev => ({ ...prev, current: i + 1 }));
         }
       }
@@ -265,6 +295,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
       setSuccessMsg(`${rows.length} alunos processados! Se houveram erros, verifique o console.`);
       setImportText("");
+      setImportPreview([]);
       setTimeout(() => {
         setShowImportModal(false);
         setImportProgress({ current: 0, total: 0 });
@@ -279,42 +310,89 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!newUser.nome || !newUser.senha) {
+      alert("Nome e Senha são obrigatórios.");
+      return;
+    }
+
+    if (newUser.role !== "master" && !newUser.franquiaId) {
+      alert("Selecione uma unidade para este usuário.");
+      return;
+    }
+
     setLoading(true);
     setSuccessMsg("");
 
+    let secondaryApp;
     try {
       // Create a secondary app instance to create the user without signing out the admin
       const secondaryAppName = "secondary-" + Date.now();
-      const secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
+      secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
       const secondaryAuth = getAuth(secondaryApp);
 
-      const finalEmail = newUser.role === "aluno" && newUser.codigo 
-        ? `${newUser.codigo}@mult.com.br` 
-        : newUser.email;
+      // Determine the final email to use
+      let finalEmail = newUser.email.trim();
+      
+      // If it's a student and email is empty but code is provided, generate it
+      if (newUser.role === "aluno" && !finalEmail && newUser.codigo) {
+        finalEmail = `${newUser.codigo.trim()}@mult.com.br`;
+      }
 
-      const userCred = await createUserWithEmailAndPassword(secondaryAuth, finalEmail, newUser.senha);
+      if (!finalEmail || !finalEmail.includes("@")) {
+        throw new Error("E-mail inválido ou não fornecido.");
+      }
+
+      let userCred;
+      try {
+        userCred = await createUserWithEmailAndPassword(secondaryAuth, finalEmail, newUser.senha);
+      } catch (authErr: any) {
+        if (authErr.code === "auth/email-already-in-use") {
+          // Try to recover UID by signing in
+          try {
+            userCred = await signInWithEmailAndPassword(secondaryAuth, finalEmail, newUser.senha);
+          } catch (loginErr: any) {
+            throw new Error("Este e-mail já está em uso e não foi possível recuperar o acesso (senha incorreta).");
+          }
+        } else {
+          throw authErr;
+        }
+      }
       
       await setDoc(doc(db, "users", userCred.user.uid), {
         uid: userCred.user.uid,
         displayName: newUser.nome,
         email: finalEmail,
-        codigo: newUser.codigo,
+        codigo: newUser.codigo || "",
         role: newUser.role,
-        franquiaId: newUser.franquiaId,
+        franquiaId: newUser.franquiaId || "",
         xp: 0,
         unlockedBadges: [],
         createdAt: new Date().toISOString()
       });
 
       await signOut(secondaryAuth);
-      await deleteApp(secondaryApp);
-
       setSuccessMsg("Usuário criado com sucesso!");
-      setNewUser({ nome: "", email: "", senha: "", role: "aluno", franquiaId: profile.franquiaId || "" });
+      setNewUser({ 
+        nome: "", 
+        email: "", 
+        codigo: "", 
+        senha: "", 
+        role: "aluno", 
+        franquiaId: profile.franquiaId || "" 
+      });
       setTimeout(() => setShowAddUser(false), 2000);
     } catch (err: any) {
-      alert("Erro ao criar usuário: " + err.message);
+      console.error("Erro ao criar usuário:", err);
+      alert("Erro ao criar usuário: " + (err.message || "Erro desconhecido"));
     } finally {
+      if (secondaryApp) {
+        try {
+          await deleteApp(secondaryApp);
+        } catch (e) {
+          console.warn("Erro ao deletar app secundário:", e);
+        }
+      }
       setLoading(false);
     }
   };
@@ -814,29 +892,51 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
               </h2>
 
               <form onSubmit={handleCreateUser} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Nome Completo</label>
+                  <input 
+                    required
+                    value={newUser.nome}
+                    onChange={e => setNewUser({...newUser, nome: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                    placeholder="Nome do usuário"
+                  />
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Nome Completo</label>
-                    <input 
-                      required
-                      value={newUser.nome}
-                      onChange={e => setNewUser({...newUser, nome: e.target.value})}
-                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
-                    />
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">E-mail</label>
+                    <div className="flex gap-2">
+                      <input 
+                        required={newUser.role !== "aluno"}
+                        type="email"
+                        value={newUser.email}
+                        onChange={e => setNewUser({...newUser, email: e.target.value})}
+                        className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                        placeholder="seu@email.com"
+                      />
+                      {newUser.role === "aluno" && newUser.codigo && (
+                        <button 
+                          type="button"
+                          onClick={() => setNewUser({...newUser, email: `${newUser.codigo}@mult.com.br`})}
+                          className="px-3 bg-mult-orange/20 text-mult-orange rounded-lg border border-mult-orange/30 hover:bg-mult-orange/30 transition-all text-[10px] font-black uppercase"
+                          title="Gerar E-mail MULT"
+                        >
+                          GERAR
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
-                      {newUser.role === "aluno" ? "Código de Matrícula" : "E-mail"}
+                      Matrícula / Código {newUser.role !== "aluno" && "(Opcional)"}
                     </label>
                     <input 
-                      required
-                      type={newUser.role === "aluno" ? "text" : "email"}
-                      value={newUser.role === "aluno" ? newUser.codigo : newUser.email}
-                      onChange={e => newUser.role === "aluno" 
-                        ? setNewUser({...newUser, codigo: e.target.value}) 
-                        : setNewUser({...newUser, email: e.target.value})}
+                      required={newUser.role === "aluno"}
+                      value={newUser.codigo}
+                      onChange={e => setNewUser({...newUser, codigo: e.target.value})}
                       className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
-                      placeholder={newUser.role === "aluno" ? "Ex: 12345" : "seu@email.com"}
+                      placeholder="Ex: 12345"
                     />
                   </div>
                 </div>
@@ -850,6 +950,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                       value={newUser.senha}
                       onChange={e => setNewUser({...newUser, senha: e.target.value})}
                       className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                      placeholder="Mínimo 6 caracteres"
                     />
                   </div>
                   <div className="space-y-1">
@@ -916,16 +1017,37 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
               </h2>
 
               <form onSubmit={handleUpdateUser} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Nome Completo</label>
+                  <input 
+                    required
+                    value={showEditUser.displayName}
+                    onChange={e => setShowEditUser({...showEditUser, displayName: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                  />
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Nome Completo</label>
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">E-mail (Apenas Leitura)</label>
                     <input 
-                      required
-                      value={showEditUser.displayName}
-                      onChange={e => setShowEditUser({...showEditUser, displayName: e.target.value})}
+                      disabled
+                      type="email"
+                      value={showEditUser.email}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm opacity-50 cursor-not-allowed"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Matrícula / Código</label>
+                    <input 
+                      value={showEditUser.codigo || ""}
+                      onChange={e => setShowEditUser({...showEditUser, codigo: e.target.value})}
                       className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
                     />
                   </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Cargo (Role)</label>
                     <select 

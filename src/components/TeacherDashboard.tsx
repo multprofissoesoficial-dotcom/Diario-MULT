@@ -81,16 +81,16 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
     const xp = bonus ? XP_BONUS : XP_PER_MISSION;
 
     try {
-      // Update mission status
-      await updateDoc(doc(db, "missions", mission.id), {
-        status: bonus ? "bonus" : "approved",
-        xpAwarded: xp
-      });
-
-      // Update student XP
-      await updateDoc(doc(db, "users", mission.studentId), {
-        xp: increment(xp)
-      });
+      // Update mission status and student XP in parallel for faster real-time feedback
+      await Promise.all([
+        updateDoc(doc(db, "missions", mission.id), {
+          status: bonus ? "bonus" : "approved",
+          xpAwarded: xp
+        }),
+        updateDoc(doc(db, "users", mission.studentId), {
+          xp: increment(xp)
+        })
+      ]);
     } catch (err) {
       console.error(err);
     } finally {

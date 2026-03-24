@@ -10,26 +10,9 @@ export function useAuth() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
-      if (firebaseUser) {
-        // Initial fetch
-        const docRef = doc(db, "users", firebaseUser.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setProfile(docSnap.data() as UserProfile);
-        }
-
-        // Real-time listener for profile changes (XP, etc.)
-        const unsubProfile = onSnapshot(docRef, (doc) => {
-          if (doc.exists()) {
-            setProfile(doc.data() as UserProfile);
-          }
-        });
-
-        setLoading(false);
-        return () => unsubProfile();
-      } else {
+      if (!firebaseUser) {
         setProfile(null);
         setLoading(false);
       }
@@ -37,6 +20,27 @@ export function useAuth() {
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const docRef = doc(db, "users", user.uid);
+    
+    // Real-time listener for profile changes (XP, etc.)
+    const unsubProfile = onSnapshot(docRef, (doc) => {
+      if (doc.exists()) {
+        setProfile(doc.data() as UserProfile);
+      } else {
+        setProfile(null);
+      }
+      setLoading(false);
+    }, (error) => {
+      console.error("Error listening to profile:", error);
+      setLoading(false);
+    });
+
+    return () => unsubProfile();
+  }, [user]);
 
   return { user, profile, loading };
 }

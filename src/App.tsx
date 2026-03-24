@@ -3,9 +3,9 @@ import Auth from "./components/Auth";
 import StudentDashboard from "./components/StudentDashboard";
 import TeacherDashboard from "./components/TeacherDashboard";
 import AdminDashboard from "./components/AdminDashboard";
-import SeedMaster from "./components/SeedMaster";
 import { motion, AnimatePresence } from "motion/react";
-import { Rocket } from "lucide-react";
+import { Rocket, LogOut } from "lucide-react";
+import { auth } from "./firebase";
 import { useState } from "react";
 
 export default function App() {
@@ -59,8 +59,27 @@ export default function App() {
             )}
           </motion.div>
         ) : (
-          <div className="min-h-screen flex items-center justify-center text-red-400">
-            Erro ao carregar perfil. Tente novamente.
+          <div className="min-h-screen flex flex-col items-center justify-center bg-cockpit-bg p-6 text-center">
+            <div className="glass-card p-8 max-w-md space-y-6 border-red-500/30">
+              <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto border border-red-500/20">
+                <Rocket className="text-red-500 w-8 h-8 rotate-180" />
+              </div>
+              <div className="space-y-2">
+                <h2 className="text-xl font-black text-white uppercase tracking-tighter">Erro de Sincronização</h2>
+                <p className="text-gray-400 text-sm">
+                  Sua conta de acesso existe, mas seu perfil de aluno/colaborador não foi encontrado no banco de dados.
+                </p>
+                <p className="text-gray-500 text-xs italic">
+                  Isso geralmente ocorre quando uma importação é interrompida. Entre em contato com o suporte.
+                </p>
+              </div>
+              <button 
+                onClick={() => auth.signOut()}
+                className="w-full py-4 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl border border-white/10 transition-all uppercase tracking-widest text-xs flex items-center justify-center gap-2"
+              >
+                <LogOut className="w-4 h-4" /> VOLTAR AO LOGIN
+              </button>
+            </div>
           </div>
         )}
       </AnimatePresence>

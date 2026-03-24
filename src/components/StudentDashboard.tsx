@@ -31,6 +31,23 @@ const iconMap: any = {
   Database
 };
 
+function XPCounter({ value }: { value: number }) {
+  const [displayValue, setDisplayValue] = useState(value);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (displayValue < value) {
+        setDisplayValue(prev => Math.min(prev + 5, value));
+      } else if (displayValue > value) {
+        setDisplayValue(value);
+      }
+    }, 20);
+    return () => clearTimeout(timeout);
+  }, [value, displayValue]);
+
+  return <span>{displayValue}</span>;
+}
+
 export default function StudentDashboard({ profile }: { profile: UserProfile }) {
   const [module, setModule] = useState(MODULES[0]);
   const [classNum, setClassNum] = useState(1);
@@ -208,7 +225,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
 
             <div className="space-y-2">
               <div className="flex justify-between text-xs font-bold uppercase tracking-widest text-gray-400">
-                <span>XP: {profile.xp}</span>
+                <span>XP: <XPCounter value={profile.xp} /></span>
                 {nextRank && <span>Próximo: {nextRank.minXP} XP</span>}
               </div>
               <div className="h-3 bg-white/5 rounded-full overflow-hidden border border-white/10">
