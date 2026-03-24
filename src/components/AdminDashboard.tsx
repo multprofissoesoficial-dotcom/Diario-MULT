@@ -156,13 +156,40 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
+  const [importPreview, setImportPreview] = useState<any[]>([]);
+
+  const handlePreviewImport = () => {
+    if (!importText.trim()) return;
+    const results = Papa.parse(importText, { 
+      header: true, 
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim(),
+      delimitersToGuess: [',', ';', '\t', '|']
+    });
+    setImportPreview(results.data as any[]);
+  };
+
   const handleImportStudents = async () => {
     if (!importText.trim()) return;
     setLoading(true);
     setSuccessMsg("");
     
-    const results = Papa.parse(importText, { header: true, skipEmptyLines: true });
+    const results = Papa.parse(importText, { 
+      header: true, 
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim(),
+      delimitersToGuess: [',', ';', '\t', '|']
+    });
+    
     const rows = results.data as any[];
+    console.log("Linhas detectadas para importação:", rows);
+    
+    if (rows.length === 0) {
+      alert("Nenhum dado válido detectado. Verifique se o cabeçalho está correto.");
+      setLoading(false);
+      return;
+    }
+
     setImportProgress({ current: 0, total: rows.length });
 
     try {
@@ -613,21 +640,56 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
               <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2">
                 <p className="text-[10px] font-black text-mult-orange uppercase tracking-widest flex items-center gap-2">
-                  <AlertCircle className="w-3 h-3" /> Formato Esperado:
+                  <AlertCircle className="w-3 h-3" /> Formato Recomendado (Ponto e Vírgula):
                 </p>
                 <code className="text-[10px] text-gray-400 block bg-black/40 p-2 rounded font-mono">
-                  Nome Completo,Código,Senha Temporária,Unidade<br/>
-                  João Silva,12345,nome123,rio-verde<br/>
-                  Maria Souza,67890,nome123,goiania
+                  Nome Completo;Código;Unidade;Senha Temporária<br/>
+                  João Silva;12345;unidade-01;senha123<br/>
+                  Maria Souza;67890;unidade-01;senha456
                 </code>
               </div>
 
-              <textarea 
-                value={importText}
-                onChange={e => setImportText(e.target.value)}
-                placeholder="Cole aqui o conteúdo do seu CSV..."
-                className="w-full h-48 bg-white/5 border border-white/10 rounded-xl p-4 text-sm font-mono focus:outline-none focus:border-neon-blue transition-all"
-              />
+              <div className="space-y-4">
+                <textarea 
+                  value={importText}
+                  onChange={e => { setImportText(e.target.value); setImportPreview([]); }}
+                  placeholder="Cole aqui o conteúdo do seu CSV ou Excel..."
+                  className="w-full h-48 bg-white/5 border border-white/10 rounded-xl p-4 text-sm font-mono focus:outline-none focus:border-neon-blue transition-all"
+                />
+                
+                <button 
+                  onClick={handlePreviewImport}
+                  className="w-full py-2 bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase tracking-widest rounded-lg border border-white/10 transition-all"
+                >
+                  VERIFICAR DADOS
+                </button>
+              </div>
+
+              {importPreview.length > 0 && (
+                <div className="max-h-40 overflow-y-auto border border-white/10 rounded-xl bg-black/20">
+                  <table className="w-full text-[10px] text-left">
+                    <thead className="bg-white/5 sticky top-0">
+                      <tr>
+                        <th className="p-2 border-b border-white/10">Nome</th>
+                        <th className="p-2 border-b border-white/10">Código</th>
+                        <th className="p-2 border-b border-white/10">Unidade</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importPreview.slice(0, 10).map((row, idx) => (
+                        <tr key={idx} className="border-b border-white/5">
+                          <td className="p-2">{row["Nome Completo"] || row["nome"]}</td>
+                          <td className="p-2">{row["Código"] || row["codigo"] || row["Matrícula"] || row["matricula"]}</td>
+                          <td className="p-2">{row["Unidade"] || row["unidade"]}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {importPreview.length > 10 && (
+                    <p className="p-2 text-center text-gray-500 italic">E mais {importPreview.length - 10} registros...</p>
+                  )}
+                </div>
+              )}
 
               {loading && (
                 <div className="space-y-2">

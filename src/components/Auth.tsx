@@ -5,6 +5,7 @@ import { motion } from "motion/react";
 import { Rocket, Mail, Lock, ShieldCheck } from "lucide-react";
 
 export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
+  const [activeTab, setActiveTab] = useState<"aluno" | "admin">("aluno");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -17,13 +18,24 @@ export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
 
     try {
       let finalEmail = identifier;
-      // If identifier is numeric, assume it's a student code
-      if (/^\d+$/.test(identifier)) {
-        finalEmail = `${identifier}@mult.com.br`;
+      
+      if (activeTab === "aluno") {
+        // If it's a student and identifier is numeric, assume it's a student code
+        if (/^\d+$/.test(identifier)) {
+          finalEmail = `${identifier}@mult.com.br`;
+        } else if (!identifier.includes("@")) {
+          // If not numeric but no @, maybe it's a code with letters?
+          finalEmail = `${identifier}@mult.com.br`;
+        }
       }
+
       await signInWithEmailAndPassword(auth, finalEmail, password);
     } catch (err: any) {
-      setError("Credenciais inválidas. Verifique seus dados e senha.");
+      if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
+        setError("Credenciais inválidas. Verifique seus dados e senha.");
+      } else {
+        setError("Erro ao autenticar. Tente novamente mais tarde.");
+      }
     } finally {
       setLoading(false);
     }
@@ -38,29 +50,56 @@ export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
       >
         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-mult-orange to-neon-blue" />
         
-        <div className="flex flex-col items-center mb-10">
-          <div className="w-24 h-24 bg-mult-orange/20 rounded-full flex items-center justify-center mb-6 neon-glow-orange border-2 border-mult-orange/30">
-            <Rocket className="text-mult-orange w-12 h-12" />
+        <div className="flex flex-col items-center mb-8">
+          <div className="w-20 h-20 bg-mult-orange/20 rounded-full flex items-center justify-center mb-4 neon-glow-orange border-2 border-mult-orange/30">
+            <Rocket className="text-mult-orange w-10 h-10" />
           </div>
-          <h1 className="text-4xl font-black tracking-tighter text-white text-center leading-none">
+          <h1 className="text-3xl font-black tracking-tighter text-white text-center leading-none">
             MULT <span className="text-mult-orange">PROFISSÕES</span>
           </h1>
-          <div className="h-px w-32 bg-white/10 my-4" />
-          <p className="text-gray-400 text-xs font-bold uppercase tracking-[0.4em]">Diário de Bordo 2.0</p>
+          <p className="text-gray-400 text-[10px] font-bold uppercase tracking-[0.4em] mt-2">Diário de Bordo 2.0</p>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex bg-white/5 p-1 rounded-xl mb-8 border border-white/10">
+          <button
+            onClick={() => { setActiveTab("aluno"); setError(""); }}
+            className={`flex-1 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+              activeTab === "aluno" 
+                ? "bg-mult-orange text-white shadow-lg" 
+                : "text-gray-500 hover:text-gray-300"
+            }`}
+          >
+            Acesso Aluno
+          </button>
+          <button
+            onClick={() => { setActiveTab("admin"); setError(""); }}
+            className={`flex-1 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+              activeTab === "admin" 
+                ? "bg-neon-blue text-black shadow-lg" 
+                : "text-gray-500 hover:text-gray-300"
+            }`}
+          >
+            Administrativo
+          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">E-mail ou Código</label>
+            <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
+              {activeTab === "aluno" ? "Matrícula ou E-mail" : "E-mail Administrativo"}
+            </label>
             <div className="relative group">
-              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-neon-blue transition-colors" />
+              <Mail className={`absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 transition-colors ${activeTab === "aluno" ? "group-focus-within:text-mult-orange" : "group-focus-within:text-neon-blue"}`} />
               <input
                 type="text"
                 required
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:outline-none focus:border-neon-blue focus:bg-white/10 transition-all text-sm"
-                placeholder="E-mail ou Matrícula"
+                className={`w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:outline-none transition-all text-sm ${
+                  activeTab === "aluno" ? "focus:border-mult-orange focus:bg-mult-orange/5" : "focus:border-neon-blue focus:bg-neon-blue/5"
+                }`}
+                placeholder={activeTab === "aluno" ? "Digite sua matrícula" : "seu@email.com"}
               />
             </div>
           </div>
@@ -68,13 +107,15 @@ export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
           <div className="space-y-2">
             <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">Senha Secreta</label>
             <div className="relative group">
-              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-neon-blue transition-colors" />
+              <Lock className={`absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 transition-colors ${activeTab === "aluno" ? "group-focus-within:text-mult-orange" : "group-focus-within:text-neon-blue"}`} />
               <input
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:outline-none focus:border-neon-blue focus:bg-white/10 transition-all text-sm"
+                className={`w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:outline-none transition-all text-sm ${
+                  activeTab === "aluno" ? "focus:border-mult-orange focus:bg-mult-orange/5" : "focus:border-neon-blue focus:bg-neon-blue/5"
+                }`}
                 placeholder="••••••••"
               />
             </div>
@@ -93,7 +134,11 @@ export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-mult-orange hover:bg-mult-orange/90 text-white font-black py-4 rounded-xl transition-all neon-glow-orange disabled:opacity-50 mt-4 text-sm tracking-widest uppercase"
+            className={`w-full font-black py-4 rounded-xl transition-all disabled:opacity-50 mt-4 text-sm tracking-widest uppercase shadow-lg ${
+              activeTab === "aluno" 
+                ? "bg-mult-orange hover:bg-mult-orange/90 text-white shadow-mult-orange/20" 
+                : "bg-neon-blue hover:bg-neon-blue/90 text-black shadow-neon-blue/20"
+            }`}
           >
             {loading ? "AUTENTICANDO..." : "INICIAR SISTEMAS"}
           </button>
