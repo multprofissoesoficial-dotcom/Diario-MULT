@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+@theme {
+  --color-mult-orange: #FF6B00;
+  --color-neon-blue: #00E5FF;
+  --color-cockpit-bg: #0A0E17;
+  --color-cockpit-card: rgba(16, 24, 39, 0.7);
+  --color-cockpit-border: rgba(255, 255, 255, 0.1);
+}
+
+@layer base {
+  body {
+    @apply bg-cockpit-bg text-white font-sans antialiased;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-cockpit-card backdrop-blur-xl border border-cockpit-border rounded-2xl shadow-2xl;
+  }
+  
+  .neon-glow-blue {
+    @apply shadow-[0_0_15px_rgba(0,229,255,0.4)];
+  }
+  
+  .neon-glow-orange {
+    @apply shadow-[0_0_15px_rgba(255,107,0,0.4)];
+  }
+}

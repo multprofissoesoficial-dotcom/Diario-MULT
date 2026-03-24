@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile data including role and franchise association.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["master", "coordenador", "professor", "aluno"] },
+        "franquiaId": { "type": "string" },
+        "xp": { "type": "integer" },
+        "unlockedBadges": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Franquia": {
+      "title": "Franquia",
+      "description": "Franchise unit data.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nome": { "type": "string" },
+        "cidade": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "nome"]
+    },
+    "Mission": {
+      "title": "Mission",
+      "description": "Student daily journey record (mission).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "franquiaId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "xp": { "type": "integer" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "feedback": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "approvedAt": { "type": "string", "format": "date-time" },
+        "approvedBy": { "type": "string" }
+      },
+      "required": ["studentId", "title", "status"]
+    }
+  },
+  "firestore": {
+    "/franquias/{franquiaId}": {
+      "schema": "Franquia",
+      "description": "Collection of franchise units."
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Collection of user profiles."
+    },
+    "/missions/{missionId}": {
+      "schema": "Mission",
+      "description": "Collection of student missions."
+    }
+  }
+}
