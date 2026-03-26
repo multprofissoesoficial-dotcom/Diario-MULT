@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState, useEffect } from "react";
 import { 
   collection, 
@@ -9,7 +11,10 @@ import {
   updateDoc, 
   increment, 
   getDoc,
-  setDoc
+  setDoc,
+  limit,
+  startAfter,
+  getDocs
 } from "firebase/firestore";
 import { db } from "../firebase";
 import { Mission, UserProfile } from "../types";
@@ -26,31 +31,106 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
   const [view, setView] = useState<"missions" | "students">("missions");
   const [showEditStudent, setShowEditStudent] = useState<UserProfile | null>(null);
   const [filter, setFilter] = useState<"pending" | "all">("pending");
+  const [turmaFilter, setTurmaFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
+  const [lastMissionDoc, setLastMissionDoc] = useState<any>(null);
+  const [hasMoreMissions, setHasMoreMissions] = useState(true);
+  const [lastStudentDoc, setLastStudentDoc] = useState<any>(null);
+  const [hasMoreStudents, setHasMoreStudents] = useState(true);
   const studentsPerPage = 50;
 
   useEffect(() => {
-    // Filter by franchise
-    const q = filter === "pending" 
-      ? query(collection(db, "missions"), where("status", "==", "pending"), where("franquiaId", "==", profile.franquiaId), orderBy("createdAt", "desc"))
-      : query(collection(db, "missions"), where("franquiaId", "==", profile.franquiaId), orderBy("createdAt", "desc"));
+    fetchMissions(true);
+  }, [filter, profile.franquiaId, searchQuery]);
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setMissions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Mission)));
-    });
+  const fetchMissions = async (reset = false) => {
+    setLoading(true);
+    try {
+      let q = query(
+        collection(db, "missions"), 
+        where("franquiaId", "==", profile.franquiaId),
+        orderBy("createdAt", "desc"),
+        limit(studentsPerPage)
+      );
 
-    return () => unsubscribe();
-  }, [filter, profile.franquiaId]);
+      if (filter === "pending") {
+        q = query(q, where("status", "==", "pending"));
+      }
+
+      if (!reset && lastMissionDoc) {
+        q = query(q, startAfter(lastMissionDoc));
+      }
+
+      const snap = await getDocs(q);
+      const newMissions = snap.docs.map(d => ({ id: d.id, ...d.data() } as Mission));
+      
+      if (reset) {
+        setMissions(newMissions);
+      } else {
+        setMissions(prev => [...prev, ...newMissions]);
+      }
+
+      setLastMissionDoc(snap.docs[snap.docs.length - 1]);
+      setHasMoreMissions(snap.docs.length === studentsPerPage);
+    } catch (err: any) {
+      console.error("Error fetching missions:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMoreMissions = () => {
+    if (!loading && hasMoreMissions) {
+      fetchMissions();
+    }
+  };
 
   useEffect(() => {
-    // Listen to Students of the same franchise
-    const q = query(collection(db, "users"), where("role", "==", "aluno"), where("franquiaId", "==", profile.franquiaId));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setStudents(snapshot.docs.map(doc => doc.data() as UserProfile));
-    });
-    return () => unsubscribe();
-  }, [profile.franquiaId]);
+    fetchStudents(true);
+  }, [profile.franquiaId, turmaFilter, searchQuery]);
+
+  const fetchStudents = async (reset = false) => {
+    setLoading(true);
+    try {
+      let q = query(
+        collection(db, "users"), 
+        where("role", "==", "aluno"), 
+        where("franquiaId", "==", profile.franquiaId),
+        orderBy("displayName"),
+        limit(studentsPerPage)
+      );
+
+      if (turmaFilter !== "all") {
+        q = query(q, where("turma", "==", turmaFilter));
+      }
+
+      if (!reset && lastStudentDoc) {
+        q = query(q, startAfter(lastStudentDoc));
+      }
+
+      const snap = await getDocs(q);
+      const newStudents = snap.docs.map(d => d.data() as UserProfile);
+      
+      if (reset) {
+        setStudents(newStudents);
+      } else {
+        setStudents(prev => [...prev, ...newStudents]);
+      }
+
+      setLastStudentDoc(snap.docs[snap.docs.length - 1]);
+      setHasMoreStudents(snap.docs.length === studentsPerPage);
+    } catch (err: any) {
+      console.error("Error fetching students:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMoreStudents = () => {
+    if (!loading && hasMoreStudents) {
+      fetchStudents();
+    }
+  };
 
   const handleUpdateStudent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,20 +169,10 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
     }
   };
 
-  const filteredMissions = missions.filter(mission => 
-    mission.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    mission.title.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const filteredStudents = students.filter(student => 
-    student.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (student.codigo && student.codigo.includes(searchQuery))
-  );
-
-  const indexOfLastStudent = currentPage * studentsPerPage;
-  const indexOfFirstStudent = indexOfLastStudent - studentsPerPage;
-  const currentStudents = filteredStudents.slice(indexOfFirstStudent, indexOfLastStudent);
-  const totalPages = Math.ceil(filteredStudents.length / studentsPerPage);
+  const filteredMissions = missions;
+  const filteredStudents = students;
+  const currentStudents = students;
+  const totalPages = 1;
 
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-8 space-y-8">
@@ -258,11 +328,34 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
                 <p className="text-gray-500 italic">Nenhuma missão pendente no radar.</p>
               </div>
             )}
+            {hasMoreMissions && (
+              <div className="flex justify-center py-4">
+                <button 
+                  onClick={loadMoreMissions}
+                  disabled={loading}
+                  className="px-8 py-3 rounded-xl bg-mult-orange text-white font-black uppercase tracking-widest text-xs neon-glow-orange disabled:opacity-50 transition-all"
+                >
+                  Carregar Mais Missões
+                </button>
+              </div>
+            )}
           </AnimatePresence>
         ) : (
           <div className="glass-card overflow-hidden">
             <div className="p-4 sm:p-6 border-b border-white/5 bg-white/5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <h3 className="text-sm font-black uppercase tracking-widest text-gray-400">Gestão de Alunos</h3>
+              <div className="flex items-center gap-4">
+                <h3 className="text-sm font-black uppercase tracking-widest text-gray-400">Gestão de Alunos</h3>
+                <select 
+                  value={turmaFilter}
+                  onChange={(e) => setTurmaFilter(e.target.value)}
+                  className="bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-widest focus:outline-none focus:border-neon-blue transition-all"
+                >
+                  <option value="all">Todas as Turmas</option>
+                  {Array.from(new Set(students.filter(u => u.turma).map(u => u.turma))).map(t => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
               <div className="relative w-full sm:w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                 <input 
@@ -271,7 +364,6 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
                   value={searchQuery}
                   onChange={(e) => {
                     setSearchQuery(e.target.value);
-                    setCurrentPage(1);
                   }}
                   className="w-full pl-10 pr-4 py-2 bg-black/20 border border-white/10 rounded-lg text-xs focus:outline-none focus:border-neon-blue transition-all"
                 />
@@ -328,28 +420,16 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
               </table>
             </div>
 
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="p-4 border-t border-white/5 bg-white/5 flex items-center justify-between gap-4">
-                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
-                  Página {currentPage} de {totalPages} ({filteredStudents.length} alunos)
-                </p>
-                <div className="flex gap-2">
-                  <button 
-                    disabled={currentPage === 1}
-                    onClick={() => setCurrentPage(prev => prev - 1)}
-                    className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition-all text-[10px] font-black uppercase tracking-widest"
-                  >
-                    Anterior
-                  </button>
-                  <button 
-                    disabled={currentPage === totalPages}
-                    onClick={() => setCurrentPage(prev => prev + 1)}
-                    className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition-all text-[10px] font-black uppercase tracking-widest"
-                  >
-                    Próxima
-                  </button>
-                </div>
+            {/* Load More Students */}
+            {hasMoreStudents && (
+              <div className="p-6 border-t border-white/5 bg-white/5 flex justify-center">
+                <button 
+                  onClick={loadMoreStudents}
+                  disabled={loading}
+                  className="px-8 py-3 rounded-xl bg-mult-orange text-white font-black uppercase tracking-widest text-xs neon-glow-orange disabled:opacity-50 transition-all"
+                >
+                  Carregar Mais Alunos
+                </button>
               </div>
             )}
           </div>

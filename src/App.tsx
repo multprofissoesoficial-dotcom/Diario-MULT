@@ -1,3 +1,5 @@
+"use client";
+
 import { useAuth } from "./hooks/useAuth";
 import Auth from "./components/Auth";
 import StudentDashboard from "./components/StudentDashboard";
@@ -64,13 +66,22 @@ export default function App() {
               <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto border border-red-500/20">
                 <Rocket className="text-red-500 w-8 h-8 rotate-180" />
               </div>
-              <div className="space-y-2">
-                <h2 className="text-xl font-black text-white uppercase tracking-tighter">Erro de Sincronização</h2>
-                <p className="text-gray-400 text-sm">
-                  Sua conta de acesso existe, mas seu perfil de aluno/colaborador não foi encontrado no banco de dados.
-                </p>
-                <p className="text-gray-500 text-xs italic">
-                  Isso geralmente ocorre quando uma importação é interrompida. Entre em contato com o suporte.
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <h2 className="text-xl font-black text-white uppercase tracking-tighter">Erro de Sincronização</h2>
+                  <p className="text-gray-400 text-sm">
+                    Sua conta de acesso existe, mas seu perfil de aluno/colaborador não foi encontrado no banco de dados.
+                  </p>
+                </div>
+                
+                <div className="bg-black/40 p-4 rounded-xl border border-white/5 text-left space-y-2">
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Dados Técnicos</p>
+                  <p className="text-[10px] font-mono text-gray-400 break-all">UID: {user.uid}</p>
+                  <p className="text-[10px] font-mono text-gray-400 break-all">E-mail: {user.email}</p>
+                </div>
+
+                <p className="text-gray-500 text-[10px] italic uppercase tracking-widest">
+                  Informe os dados acima ao seu Coordenador para regularizar seu acesso.
                 </p>
               </div>
               <button 

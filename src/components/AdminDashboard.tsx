@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState, useEffect } from "react";
 import { 
   collection, 
@@ -8,7 +10,9 @@ import {
   setDoc, 
   deleteDoc,
   onSnapshot,
-  orderBy
+  orderBy,
+  limit,
+  startAfter
 } from "firebase/firestore";
 import { 
   getAuth, 
@@ -42,7 +46,8 @@ import {
   Upload,
   AlertCircle,
   Trash2,
-  Clock
+  Clock,
+  Lock as LockIcon
 } from "lucide-react";
 
 export default function AdminDashboard({ profile }: { profile: UserProfile }) {
@@ -61,8 +66,18 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [usersPerPage] = useState(50);
   const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [turmaFilter, setTurmaFilter] = useState<string>("all");
+  const [lastDoc, setLastDoc] = useState<any>(null);
+  const [hasMore, setHasMore] = useState(true);
   const [pendingOnly, setPendingOnly] = useState(false);
   const [pendingMissions, setPendingMissions] = useState<Mission[]>([]);
+  const [activeTab, setActiveTab] = useState<"users" | "activities">("users");
+  const [allMissions, setAllMissions] = useState<Mission[]>([]);
+  const [lastMissionDoc, setLastMissionDoc] = useState<any>(null);
+  const [hasMoreMissions, setHasMoreMissions] = useState(true);
+  const [dateFilter, setDateFilter] = useState({ start: "", end: "" });
+  const [activitySearch, setActivitySearch] = useState("");
+  const [activityStatusFilter, setActivityStatusFilter] = useState<string>("all");
   
   // Form states
   const [newUser, setNewUser] = useState({
@@ -71,7 +86,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     codigo: "",
     senha: "",
     role: "aluno" as any,
-    franquiaId: profile.franquiaId || ""
+    franquiaId: profile.franquiaId || "",
+    turma: ""
   });
   const [newFranquia, setNewFranquia] = useState({ id: "", nome: "", cidade: "" });
   const [successMsg, setSuccessMsg] = useState("");
@@ -86,24 +102,60 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   }, []);
 
   useEffect(() => {
-    // Listen to Users
-    let q = query(collection(db, "users"));
-    
-    if (profile.role !== "master") {
-      // Coordinator only sees their unit
-      q = query(collection(db, "users"), where("franquiaId", "==", profile.franquiaId));
-    } else if (selectedFranquia !== "all") {
-      // Master filtering by unit
-      q = query(collection(db, "users"), where("franquiaId", "==", selectedFranquia));
+    // Initial fetch of users
+    fetchUsers(true);
+  }, [selectedFranquia, profile.franquiaId, profile.role, roleFilter, turmaFilter, searchQuery]);
+
+  const fetchUsers = async (reset = false) => {
+    setLoading(true);
+    try {
+      let q = query(collection(db, "users"), orderBy("displayName"), limit(usersPerPage));
+      
+      if (profile.role !== "master") {
+        q = query(q, where("franquiaId", "==", profile.franquiaId));
+      } else if (selectedFranquia !== "all") {
+        q = query(q, where("franquiaId", "==", selectedFranquia));
+      }
+
+      if (roleFilter !== "all") {
+        q = query(q, where("role", "==", roleFilter));
+      }
+
+      if (turmaFilter !== "all") {
+        q = query(q, where("turma", "==", turmaFilter));
+      }
+
+      // Note: Search with where is limited in Firestore. 
+      // For now we'll keep the client-side filtering for search or implement a better search later.
+      // But we'll limit the initial fetch.
+
+      if (!reset && lastDoc) {
+        q = query(q, startAfter(lastDoc));
+      }
+
+      const snap = await getDocs(q);
+      const newUsers = snap.docs.map(d => d.data() as UserProfile);
+      
+      if (reset) {
+        setUsers(newUsers);
+      } else {
+        setUsers(prev => [...prev, ...newUsers]);
+      }
+
+      setLastDoc(snap.docs[snap.docs.length - 1]);
+      setHasMore(snap.docs.length === usersPerPage);
+    } catch (err: any) {
+      console.error("Error fetching users:", err);
+    } finally {
+      setLoading(false);
     }
+  };
 
-    const unsubUsers = onSnapshot(q, (snap) => {
-      setUsers(snap.docs.map(d => d.data() as UserProfile));
-      setCurrentPage(1); // Reset to first page on filter change
-    });
-
-    return () => unsubUsers();
-  }, [selectedFranquia, profile.franquiaId, profile.role]);
+  const loadMoreUsers = () => {
+    if (!loading && hasMore) {
+      fetchUsers();
+    }
+  };
 
   useEffect(() => {
     // Listen to Pending Missions
@@ -122,27 +174,102 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     return () => unsubMissions();
   }, [selectedFranquia, profile.franquiaId, profile.role]);
 
+  useEffect(() => {
+    fetchMissions(true);
+  }, [selectedFranquia, profile.franquiaId, profile.role, activityStatusFilter, activitySearch, dateFilter]);
+
+  const fetchMissions = async (reset = false) => {
+    setLoading(true);
+    try {
+      let q = query(collection(db, "missions"), orderBy("createdAt", "desc"), limit(usersPerPage));
+      
+      if (profile.role !== "master") {
+        q = query(q, where("franquiaId", "==", profile.franquiaId));
+      } else if (selectedFranquia !== "all") {
+        q = query(q, where("franquiaId", "==", selectedFranquia));
+      }
+
+      if (activityStatusFilter !== "all") {
+        q = query(q, where("status", "==", activityStatusFilter));
+      }
+
+      // Date filtering in Firestore is complex with multiple where clauses.
+      // For now, we'll keep client-side filtering for dates and search if needed,
+      // but we limit the fetch.
+
+      if (!reset && lastMissionDoc) {
+        q = query(q, startAfter(lastMissionDoc));
+      }
+
+      const snap = await getDocs(q);
+      const newMissions = snap.docs.map(d => ({ id: d.id, ...d.data() } as Mission));
+      
+      if (reset) {
+        setAllMissions(newMissions);
+      } else {
+        setAllMissions(prev => [...prev, ...newMissions]);
+      }
+
+      setLastMissionDoc(snap.docs[snap.docs.length - 1]);
+      setHasMoreMissions(snap.docs.length === usersPerPage);
+    } catch (err: any) {
+      console.error("Error fetching missions:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMoreMissions = () => {
+    if (!loading && hasMoreMissions) {
+      fetchMissions();
+    }
+  };
+
   const totalAlunos = users.filter(u => u.role === "aluno").length;
   const totalProfessores = users.filter(u => u.role === "professor").length;
   const totalCoordenadores = users.filter(u => u.role === "coordenador").length;
+  const avgXP = totalAlunos > 0 ? Math.round(users.filter(u => u.role === "aluno").reduce((acc, curr) => acc + (curr.xp || 0), 0) / totalAlunos) : 0;
+
+  const handleResetPassword = async (email: string) => {
+    if (!window.confirm(`Deseja enviar um e-mail de redefinição de senha para ${email}?`)) return;
+    
+    try {
+      const { sendPasswordResetEmail } = await import("firebase/auth");
+      await sendPasswordResetEmail(auth, email);
+      alert("E-mail de redefinição enviado com sucesso!");
+    } catch (error: any) {
+      console.error("Erro ao enviar reset:", error);
+      alert("Erro ao enviar e-mail: " + error.message);
+    }
+  };
 
   const filteredUsers = users.filter(u => {
     const matchesSearch = u.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (u.codigo && u.codigo.includes(searchQuery));
     
-    const matchesRole = roleFilter === "all" || u.role === roleFilter;
-    
     const matchesPending = !pendingOnly || pendingMissions.some(m => m.studentId === u.uid);
     
-    return matchesSearch && matchesRole && matchesPending;
+    return matchesSearch && matchesPending;
   });
 
-  // Pagination logic
-  const indexOfLastUser = currentPage * usersPerPage;
-  const indexOfFirstUser = indexOfLastUser - usersPerPage;
-  const currentUsers = filteredUsers.slice(indexOfFirstUser, indexOfLastUser);
-  const totalPages = Math.ceil(filteredUsers.length / usersPerPage);
+  const filteredMissions = allMissions.filter(m => {
+    const matchesSearch = m.studentName.toLowerCase().includes(activitySearch.toLowerCase()) ||
+      m.module.toLowerCase().includes(activitySearch.toLowerCase()) ||
+      m.content.toLowerCase().includes(activitySearch.toLowerCase());
+    
+    const matchesStatus = activityStatusFilter === "all" || m.status === activityStatusFilter;
+    
+    const missionDate = m.createdAt ? new Date(m.createdAt) : null;
+    const matchesDate = (!dateFilter.start || (missionDate && missionDate >= new Date(dateFilter.start))) &&
+      (!dateFilter.end || (missionDate && missionDate <= new Date(dateFilter.end + "T23:59:59")));
+    
+    return matchesSearch && matchesStatus && matchesDate;
+  });
+
+  // Pagination logic removed in favor of Load More
+  const currentUsers = filteredUsers;
+  const totalPages = 1; // Not used anymore
 
   const handleClearAllStudents = async () => {
     setLoading(true);
@@ -211,7 +338,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     });
     
     const rows = results.data as any[];
-    console.log("Linhas detectadas para importação:", rows);
     
     if (rows.length === 0) {
       alert("Nenhum dado válido detectado. Verifique se o cabeçalho está correto.");
@@ -219,114 +345,57 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       return;
     }
 
-    setImportProgress({ current: 0, total: rows.length });
+    const studentsToImport = rows.map(row => {
+      const nome = row["Nome Completo"] || row["nome"];
+      const codigo = row["Código"] || row["codigo"] || row["Matrícula"] || row["matricula"];
+      const email = row["Email"] || row["email"];
+      const senha = row["Senha Temporária"] || row["senha"] || (codigo ? String(codigo) : "nome123");
+      const unidadeInput = row["Unidade"] || row["unidade"];
+      const turma = row["Turma"] || row["turma"];
 
-    try {
-      // Create ONE secondary app instance for the entire import process
-      const secondaryAppName = `import-${Date.now()}`;
-      const secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
-      const secondaryAuth = getAuth(secondaryApp);
-
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        const nome = row["Nome Completo"] || row["nome"];
-        const codigo = row["Código"] || row["codigo"] || row["Matrícula"] || row["matricula"];
-        const email = row["Email"] || row["email"] || (codigo ? `${codigo}@mult.com.br` : "");
-        const senha = row["Senha Temporária"] || row["senha"] || "nome123";
-        const unidadeInput = row["Unidade"] || row["unidade"];
-
-        if (!nome || !email || !unidadeInput) {
-          console.warn(`Linha ${i + 1} ignorada: Dados incompletos.`, { nome, email, unidadeInput });
-          setImportProgress(prev => ({ ...prev, current: i + 1 }));
-          continue;
-        }
-
-        // Try to find the franchise ID by name or city if the input isn't already a valid ID
-        let finalUnidadeId = unidadeInput;
-        const normalize = (s: string) => s.toLowerCase().replace(/[-_]/g, " ").trim();
-        const normalizedInput = normalize(unidadeInput);
-        
-        const foundFranquia = franquias.find(f => 
-          f.id === unidadeInput || 
-          normalize(f.nome) === normalizedInput ||
-          normalize(f.cidade) === normalizedInput
-        );
-        
-        if (foundFranquia) {
-          finalUnidadeId = foundFranquia.id;
-        } else {
-          console.warn(`Aviso: Unidade "${unidadeInput}" não encontrada no cadastro. Usando valor original.`);
-        }
-
-        // Check if user already exists in Firestore by email
-        const existingQuery = query(collection(db, "users"), where("email", "==", email));
-        const existingSnap = await getDocs(existingQuery);
-        if (!existingSnap.empty) {
-          console.log(`Usuário ${email} já existe no Firestore, pulando...`);
-          setImportProgress(prev => ({ ...prev, current: i + 1 }));
-          continue;
-        }
-
-        try {
-          // Add a small delay to avoid Firebase Auth rate limits (too-many-requests)
-          await new Promise(resolve => setTimeout(resolve, 600));
-
-          let userCred;
-          try {
-            userCred = await createUserWithEmailAndPassword(secondaryAuth, email, senha);
-          } catch (authErr: any) {
-            if (authErr.code === "auth/too-many-requests") {
-              console.log("Muitas requisições, aguardando 5 segundos para tentar novamente...");
-              await new Promise(resolve => setTimeout(resolve, 5000));
-              userCred = await createUserWithEmailAndPassword(secondaryAuth, email, senha);
-            } else if (authErr.code === "auth/email-already-in-use") {
-              // This is a special case: user exists in Auth but not in Firestore
-              // We'll try to sign in with the provided password to get the UID
-              console.log(`Email ${email} já existe no Auth. Tentando recuperar UID...`);
-              try {
-                userCred = await signInWithEmailAndPassword(secondaryAuth, email, senha);
-                console.log(`UID recuperado para ${email}: ${userCred.user.uid}`);
-              } catch (loginErr: any) {
-                console.warn(`Não foi possível recuperar UID para ${email}: Senha incorreta ou erro no Auth.`, loginErr.message);
-                setImportProgress(prev => ({ ...prev, current: i + 1 }));
-                continue;
-              }
-            } else {
-              throw authErr;
-            }
-          }
-          
-          await setDoc(doc(db, "users", userCred.user.uid), {
-            uid: userCred.user.uid,
-            displayName: nome,
-            email: email,
-            codigo: codigo || "",
-            role: "aluno",
-            franquiaId: finalUnidadeId,
-            xp: 0,
-            unlockedBadges: [],
-            createdAt: new Date().toISOString()
-          });
-
-          // Sign out the secondary user immediately to allow the next creation
-          await signOut(secondaryAuth);
-          
-          setImportProgress(prev => ({ ...prev, current: i + 1 }));
-        } catch (err: any) {
-          console.error(`Erro crítico ao importar ${email}:`, err);
-          setImportProgress(prev => ({ ...prev, current: i + 1 }));
-        }
+      let finalUnidadeId = unidadeInput;
+      const normalize = (s: string) => s.toLowerCase().replace(/[-_]/g, " ").trim();
+      const normalizedInput = normalize(unidadeInput || "");
+      
+      const foundFranquia = franquias.find(f => 
+        f.id === unidadeInput || 
+        normalize(f.nome) === normalizedInput ||
+        normalize(f.cidade) === normalizedInput
+      );
+      
+      if (foundFranquia) {
+        finalUnidadeId = foundFranquia.id;
       }
 
-      // Cleanup the secondary app after all imports are done
-      await deleteApp(secondaryApp);
+      return {
+        nome,
+        codigo,
+        email,
+        senha,
+        franquiaId: finalUnidadeId,
+        turma
+      };
+    });
 
-      setSuccessMsg(`${rows.length} alunos processados! Se houveram erros, verifique o console.`);
+    try {
+      const response = await fetch("/api/students/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ students: studentsToImport }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao importar alunos");
+      }
+
+      const importResult = await response.json();
+      setSuccessMsg(`${importResult.success} alunos importados, ${importResult.skipped} pulados, ${importResult.errors} erros.`);
       setImportText("");
       setImportPreview([]);
       setTimeout(() => {
         setShowImportModal(false);
-        setImportProgress({ current: 0, total: 0 });
+        setSuccessMsg("");
       }, 3000);
     } catch (err: any) {
       console.error("Erro na importação:", err);
@@ -352,54 +421,18 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     setLoading(true);
     setSuccessMsg("");
 
-    let secondaryApp;
     try {
-      // Create a secondary app instance to create the user without signing out the admin
-      const secondaryAppName = "secondary-" + Date.now();
-      secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
-      const secondaryAuth = getAuth(secondaryApp);
-
-      // Determine the final email to use
-      let finalEmail = newUser.email.trim();
-      
-      // If it's a student and email is empty but code is provided, generate it
-      if (newUser.role === "aluno" && !finalEmail && newUser.codigo) {
-        finalEmail = `${newUser.codigo.trim()}@mult.com.br`;
-      }
-
-      if (!finalEmail || !finalEmail.includes("@")) {
-        throw new Error("E-mail inválido ou não fornecido.");
-      }
-
-      let userCred;
-      try {
-        userCred = await createUserWithEmailAndPassword(secondaryAuth, finalEmail, newUser.senha);
-      } catch (authErr: any) {
-        if (authErr.code === "auth/email-already-in-use") {
-          // Try to recover UID by signing in
-          try {
-            userCred = await signInWithEmailAndPassword(secondaryAuth, finalEmail, newUser.senha);
-          } catch (loginErr: any) {
-            throw new Error("Este e-mail já está em uso e não foi possível recuperar o acesso (senha incorreta).");
-          }
-        } else {
-          throw authErr;
-        }
-      }
-      
-      await setDoc(doc(db, "users", userCred.user.uid), {
-        uid: userCred.user.uid,
-        displayName: newUser.nome,
-        email: finalEmail,
-        codigo: newUser.codigo || "",
-        role: newUser.role,
-        franquiaId: newUser.franquiaId || "",
-        xp: 0,
-        unlockedBadges: [],
-        createdAt: new Date().toISOString()
+      const response = await fetch("/api/users/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newUser),
       });
 
-      await signOut(secondaryAuth);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao criar usuário");
+      }
+
       setSuccessMsg("Usuário criado com sucesso!");
       setNewUser({ 
         nome: "", 
@@ -407,20 +440,14 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         codigo: "", 
         senha: "", 
         role: "aluno", 
-        franquiaId: profile.franquiaId || "" 
+        franquiaId: profile.franquiaId || "",
+        turma: ""
       });
       setTimeout(() => setShowAddUser(false), 2000);
     } catch (err: any) {
       console.error("Erro ao criar usuário:", err);
       alert("Erro ao criar usuário: " + (err.message || "Erro desconhecido"));
     } finally {
-      if (secondaryApp) {
-        try {
-          await deleteApp(secondaryApp);
-        } catch (e) {
-          console.warn("Erro ao deletar app secundário:", e);
-        }
-      }
       setLoading(false);
     }
   };
@@ -454,6 +481,42 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleGenerateReport = () => {
+    const filteredMissions = allMissions.filter(m => {
+      const matchesSearch = m.studentName.toLowerCase().includes(activitySearch.toLowerCase()) ||
+        m.module.toLowerCase().includes(activitySearch.toLowerCase()) ||
+        m.content.toLowerCase().includes(activitySearch.toLowerCase());
+      
+      const matchesStatus = activityStatusFilter === "all" || m.status === activityStatusFilter;
+      
+      const missionDate = m.createdAt ? new Date(m.createdAt) : null;
+      const matchesDate = (!dateFilter.start || (missionDate && missionDate >= new Date(dateFilter.start))) &&
+        (!dateFilter.end || (missionDate && missionDate <= new Date(dateFilter.end + "T23:59:59")));
+      
+      return matchesSearch && matchesStatus && matchesDate;
+    });
+
+    const csvData = filteredMissions.map(m => ({
+      "Aluno": m.studentName,
+      "Atividade": `${m.module} - Aula ${m.classNum}`,
+      "Data": m.createdAt ? new Date(m.createdAt).toLocaleDateString("pt-BR") : "N/A",
+      "Status": m.status === "approved" ? "Aprovado" : m.status === "pending" ? "Pendente" : m.status === "bonus" ? "Bônus" : "Rejeitado",
+      "XP": m.xpAwarded || 0,
+      "Unidade": franquias.find(f => f.id === m.franquiaId)?.nome || "N/A"
+    }));
+
+    const csv = Papa.unparse(csvData);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `relatorio_atividades_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
   const handleCreateFranquia = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -507,6 +570,28 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           </button>
         </div>
       </header>
+
+      {/* Tab Navigation */}
+      <div className="flex items-center gap-2 p-1 bg-white/5 rounded-2xl w-fit border border-white/5">
+        <button
+          onClick={() => setActiveTab("users")}
+          className={cn(
+            "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
+            activeTab === "users" ? "bg-neon-blue text-black neon-glow-blue" : "text-gray-500 hover:text-white"
+          )}
+        >
+          <Users className="w-4 h-4" /> Gestão de Usuários
+        </button>
+        <button
+          onClick={() => setActiveTab("activities")}
+          className={cn(
+            "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
+            activeTab === "activities" ? "bg-mult-orange text-white neon-glow-orange" : "text-gray-500 hover:text-white"
+          )}
+        >
+          <FileText className="w-4 h-4" /> Atividades dos Alunos
+        </button>
+      </div>
 
       {/* Stats & Controls */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
@@ -565,6 +650,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
         <button 
           onClick={() => {
+            setActiveTab("users");
             setRoleFilter("aluno");
             setPendingOnly(false);
             setCurrentPage(1);
@@ -585,6 +671,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
         <button 
           onClick={() => {
+            setActiveTab("users");
             setRoleFilter("professor");
             setPendingOnly(false);
             setCurrentPage(1);
@@ -605,6 +692,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
         <button 
           onClick={() => {
+            setActiveTab("users");
             setRoleFilter("coordenador");
             setPendingOnly(false);
             setCurrentPage(1);
@@ -625,6 +713,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
         <button 
           onClick={() => {
+            setActiveTab("users");
             setRoleFilter("all");
             setPendingOnly(true);
             setCurrentPage(1);
@@ -645,6 +734,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
         <button 
           onClick={() => {
+            setActiveTab("users");
             setRoleFilter("all");
             setPendingOnly(false);
             setCurrentPage(1);
@@ -662,19 +752,52 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             <p className="text-xl sm:text-2xl font-black">{users.length}</p>
           </div>
         </button>
+
+        {/* Extra Indicator for Coordinators/Masters */}
+        <div className="glass-card p-5 sm:p-6 flex items-center gap-4 bg-neon-blue/5 border-neon-blue/20">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue border border-neon-blue/20">
+            <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
+          </div>
+          <div>
+            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Média XP / Aluno</p>
+            <p className="text-xl sm:text-2xl font-black text-neon-blue">{avgXP}</p>
+          </div>
+        </div>
       </div>
 
-      {/* Students Table */}
-      <div className="glass-card overflow-hidden">
+      {/* Tab Content */}
+      {activeTab === "users" ? (
+        <div className="glass-card overflow-hidden">
         <div className="p-6 border-b border-white/5 bg-white/5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <h3 className="text-sm font-black uppercase tracking-widest text-gray-400 flex items-center gap-2">
-            Relatório de Desempenho
-            {(roleFilter !== "all" || pendingOnly) && (
-              <span className="px-2 py-0.5 rounded-full bg-neon-blue/10 text-neon-blue text-[9px] border border-neon-blue/20">
-                Filtro Ativo: {pendingOnly ? "Pendentes" : (ROLES_LABELS[roleFilter as keyof typeof ROLES_LABELS] || "Todos")}
-              </span>
-            )}
-          </h3>
+          <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
+            <h3 className="text-sm font-black uppercase tracking-widest text-gray-400 flex items-center gap-2">
+              Relatório de Desempenho
+            </h3>
+            <div className="flex gap-2">
+              <select 
+                value={roleFilter}
+                onChange={(e) => { setRoleFilter(e.target.value); setTurmaFilter("all"); }}
+                className="bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-widest focus:outline-none focus:border-neon-blue transition-all"
+              >
+                <option value="all">Todos os Cargos</option>
+                <option value="aluno">Alunos</option>
+                <option value="professor">Professores</option>
+                <option value="coordenador">Coordenadores</option>
+              </select>
+              {roleFilter === "aluno" && (
+                <select 
+                  value={turmaFilter}
+                  onChange={(e) => setTurmaFilter(e.target.value)}
+                  className="bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-widest focus:outline-none focus:border-neon-blue transition-all"
+                >
+                  <option value="all">Todas as Turmas</option>
+                  {Array.from(new Set(users.filter(u => u.turma).map(u => u.turma))).map(t => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
             <input 
@@ -725,7 +848,12 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                               </span>
                             )}
                           </div>
-                          <p className="text-[9px] sm:text-[10px] text-gray-600 font-mono truncate">{userItem.email || userItem.codigo}</p>
+                          <div className="flex flex-col gap-0.5">
+                            <p className="text-[9px] sm:text-[10px] text-gray-400 font-mono truncate">{userItem.email}</p>
+                            {userItem.codigo && (
+                              <p className="text-[8px] sm:text-[9px] text-mult-orange font-black uppercase tracking-widest">MAT: {userItem.codigo}</p>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </td>
@@ -747,6 +875,13 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                     </td>
                     <td className="px-4 sm:px-6 py-4 text-right shrink-0">
                       <div className="flex justify-end gap-2">
+                        <button 
+                          onClick={() => handleResetPassword(userItem.email)}
+                          className="p-1.5 sm:p-2 rounded-lg bg-white/5 hover:bg-mult-orange/20 hover:text-mult-orange transition-all text-gray-600"
+                          title="Redefinir Senha"
+                        >
+                          <LockIcon className="w-3.5 h-3.5 sm:w-4 h-4" />
+                        </button>
                         <button 
                           onClick={() => setShowEditUser(userItem)}
                           className="p-1.5 sm:p-2 rounded-lg bg-white/5 hover:bg-neon-blue/20 hover:text-neon-blue transition-all text-gray-600"
@@ -775,31 +910,155 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           </table>
         </div>
 
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="p-4 border-t border-white/5 bg-white/5 flex items-center justify-between gap-4">
-            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
-              Página {currentPage} de {totalPages} ({filteredUsers.length} usuários)
-            </p>
-            <div className="flex gap-2">
-              <button 
-                disabled={currentPage === 1}
-                onClick={() => setCurrentPage(prev => prev - 1)}
-                className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition-all text-[10px] font-black uppercase tracking-widest"
-              >
-                Anterior
-              </button>
-              <button 
-                disabled={currentPage === totalPages}
-                onClick={() => setCurrentPage(prev => prev + 1)}
-                className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition-all text-[10px] font-black uppercase tracking-widest"
-              >
-                Próxima
-              </button>
-            </div>
+        {/* Load More */}
+        {hasMore && (
+          <div className="p-6 border-t border-white/5 bg-white/5 flex justify-center">
+            <button 
+              onClick={loadMoreUsers}
+              disabled={loading}
+              className="px-8 py-3 rounded-xl bg-neon-blue text-black font-black uppercase tracking-widest text-xs neon-glow-blue disabled:opacity-50 transition-all flex items-center gap-2"
+            >
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Carregar Mais Usuários"}
+            </button>
           </div>
         )}
       </div>
+      ) : (
+        <div className="glass-card overflow-hidden">
+          <div className="p-6 border-b border-white/5 bg-white/5 space-y-6">
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
+              <h3 className="text-sm font-black uppercase tracking-widest text-gray-400">Navegação de Atividades</h3>
+              <button 
+                onClick={handleGenerateReport}
+                className="bg-neon-blue text-black font-black py-2.5 px-6 rounded-xl transition-all neon-glow-blue text-[10px] uppercase tracking-widest flex items-center gap-2"
+              >
+                <FileText className="w-4 h-4" /> Gerar Relatório CSV
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Palavra-chave</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                  <input 
+                    type="text"
+                    placeholder="Buscar aluno ou atividade..."
+                    value={activitySearch}
+                    onChange={(e) => setActivitySearch(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 bg-black/20 border border-white/10 rounded-xl text-xs focus:outline-none focus:border-neon-blue transition-all"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Status</label>
+                <select 
+                  value={activityStatusFilter}
+                  onChange={(e) => setActivityStatusFilter(e.target.value)}
+                  className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-neon-blue transition-all"
+                >
+                  <option value="all" className="bg-cockpit-bg">Todos os Status</option>
+                  <option value="pending" className="bg-cockpit-bg">Pendente</option>
+                  <option value="approved" className="bg-cockpit-bg">Aprovado</option>
+                  <option value="bonus" className="bg-cockpit-bg">Bônus</option>
+                  <option value="rejected" className="bg-cockpit-bg">Rejeitado</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Data Início</label>
+                <input 
+                  type="date"
+                  value={dateFilter.start}
+                  onChange={(e) => setDateFilter(prev => ({ ...prev, start: e.target.value }))}
+                  className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-neon-blue transition-all"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Data Fim</label>
+                <input 
+                  type="date"
+                  value={dateFilter.end}
+                  onChange={(e) => setDateFilter(prev => ({ ...prev, end: e.target.value }))}
+                  className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-neon-blue transition-all"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[800px]">
+              <thead>
+                <tr className="text-[10px] font-black text-gray-500 uppercase tracking-widest border-b border-white/5">
+                  <th className="px-6 py-4">Aluno</th>
+                  <th className="px-6 py-4">Atividade</th>
+                  <th className="px-6 py-4">Data</th>
+                  <th className="px-6 py-4">Status</th>
+                  <th className="px-6 py-4">XP</th>
+                  <th className="px-6 py-4">Unidade</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {filteredMissions.map((mission) => (
+                  <tr key={mission.id} className="hover:bg-white/5 transition-colors group">
+                    <td className="px-6 py-4">
+                      <p className="font-bold text-xs sm:text-sm">{mission.studentName}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="text-xs font-medium text-gray-300">{mission.module} - Aula {mission.classNum}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="text-[10px] font-mono text-gray-500">
+                        {mission.createdAt ? new Date(mission.createdAt).toLocaleDateString("pt-BR") : "N/A"}
+                      </p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={cn(
+                        "text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded border",
+                        mission.status === "approved" ? "bg-green-500/10 text-green-400 border-green-500/20" :
+                        mission.status === "pending" ? "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" :
+                        mission.status === "bonus" ? "bg-purple-500/10 text-purple-400 border-purple-500/20" :
+                        "bg-red-500/10 text-red-400 border-red-500/20"
+                      )}>
+                        {mission.status === "approved" ? "Aprovado" : 
+                         mission.status === "pending" ? "Pendente" : 
+                         mission.status === "bonus" ? "Bônus" : "Rejeitado"}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="text-xs font-bold text-neon-blue">+{mission.xpAwarded || 0} XP</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                        {franquias.find(f => f.id === mission.franquiaId)?.nome || "N/A"}
+                      </p>
+                    </td>
+                  </tr>
+                ))}
+                {filteredMissions.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-20 text-center text-gray-600 italic">
+                      Nenhuma atividade encontrada para os filtros selecionados.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Load More Missions */}
+          {hasMoreMissions && (
+            <div className="p-6 border-t border-white/5 bg-white/5 flex justify-center">
+              <button 
+                onClick={loadMoreMissions}
+                disabled={loading}
+                className="px-8 py-3 rounded-xl bg-mult-orange text-white font-black uppercase tracking-widest text-xs neon-glow-orange disabled:opacity-50 transition-all flex items-center gap-2"
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Carregar Mais Atividades"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Modals */}
       <AnimatePresence>
@@ -1076,6 +1335,18 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                   </div>
                 </div>
 
+                {newUser.role === "aluno" && (
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Turma (ex: 024inf)</label>
+                    <input 
+                      value={newUser.turma}
+                      onChange={e => setNewUser({...newUser, turma: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                      placeholder="Código da turma"
+                    />
+                  </div>
+                )}
+
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Franquia / Unidade</label>
                   <select 
@@ -1153,6 +1424,16 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                       className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
                     />
                   </div>
+                  {showEditUser.role === "aluno" && (
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Turma</label>
+                      <input 
+                        value={showEditUser.turma || ""}
+                        onChange={e => setShowEditUser({...showEditUser, turma: e.target.value})}
+                        className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

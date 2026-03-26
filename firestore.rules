@@ -12,18 +12,18 @@ service cloud.firestore {
 
     function isMaster() {
       return isAuthenticated() && (
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'master') ||
         request.auth.token.email == "faustodv@gmail.com" ||
-        request.auth.token.email == "multprofissoesoficial@gmail.com"
+        request.auth.token.email == "multprofissoesoficial@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'master')
       );
     }
 
     function isCoordenador(franquiaId) {
-      return isAuthenticated() && getUserData().role == 'coordenador' && getUserData().franquiaId == franquiaId;
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordenador' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId == franquiaId;
     }
 
     function isProfessor(franquiaId) {
-      return isAuthenticated() && getUserData().role == 'professor' && getUserData().franquiaId == franquiaId;
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'professor' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId == franquiaId;
     }
 
     function isOwner(userId) {
@@ -39,15 +39,15 @@ service cloud.firestore {
     // Usuários
     match /users/{userId} {
       allow read: if isAuthenticated() && (
-        isMaster() || 
         isOwner(userId) || 
-        (getUserData().role == 'coordenador' && getUserData().franquiaId == resource.data.franquiaId) ||
-        (getUserData().role == 'professor' && getUserData().franquiaId == resource.data.franquiaId)
+        isMaster() || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordenador' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId == resource.data.franquiaId) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'professor' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId == resource.data.franquiaId)
       );
-      allow create: if isMaster() || (isAuthenticated() && getUserData().role == 'coordenador' && request.resource.data.franquiaId == getUserData().franquiaId);
+      allow create: if isMaster() || (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordenador' && request.resource.data.franquiaId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId);
       allow update: if isMaster() || 
-                    (isAuthenticated() && getUserData().role == 'coordenador' && resource.data.franquiaId == getUserData().franquiaId) ||
-                    (isAuthenticated() && getUserData().role == 'professor' && resource.data.franquiaId == getUserData().franquiaId) ||
+                    (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordenador' && resource.data.franquiaId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId) ||
+                    (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'professor' && resource.data.franquiaId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId) ||
                     isOwner(userId);
       allow delete: if isMaster();
     }
@@ -57,10 +57,10 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (
         isMaster() || 
         resource.data.studentId == request.auth.uid ||
-        (getUserData().franquiaId == resource.data.franquiaId && (getUserData().role == 'coordenador' || getUserData().role == 'professor'))
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId == resource.data.franquiaId && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordenador' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'professor'))
       );
       allow create: if isAuthenticated() && request.resource.data.studentId == request.auth.uid;
-      allow update: if isMaster() || (isAuthenticated() && getUserData().franquiaId == resource.data.franquiaId && (getUserData().role == 'coordenador' || getUserData().role == 'professor'));
+      allow update: if isMaster() || (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId == resource.data.franquiaId && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordenador' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'professor'));
       allow delete: if isMaster();
     }
   }

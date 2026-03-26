@@ -1,8 +1,10 @@
+"use client";
+
 import React, { useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "../firebase";
 import { motion } from "motion/react";
-import { Rocket, Mail, Lock, ShieldCheck } from "lucide-react";
+import { Rocket, Mail, Lock as LockIcon, ShieldCheck } from "lucide-react";
 
 export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
   const [activeTab, setActiveTab] = useState<"aluno" | "admin">("aluno");
@@ -17,24 +19,24 @@ export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
     setLoading(true);
 
     try {
-      let finalEmail = identifier;
+      let finalEmail = identifier.trim();
       
       if (activeTab === "aluno") {
-        // If it's a student and identifier is numeric, assume it's a student code
-        if (/^\d+$/.test(identifier)) {
-          finalEmail = `${identifier}@mult.com.br`;
-        } else if (!identifier.includes("@")) {
-          // If not numeric but no @, maybe it's a code with letters?
-          finalEmail = `${identifier}@mult.com.br`;
+        // If it's a student and identifier is numeric or doesn't have @, assume it's a student code
+        if (!finalEmail.includes("@")) {
+          finalEmail = `${finalEmail}@mult.com.br`;
         }
       }
 
       await signInWithEmailAndPassword(auth, finalEmail, password);
     } catch (err: any) {
+      console.error("Erro de login:", err.code, err.message);
       if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
-        setError("Credenciais inválidas. Verifique seus dados e senha.");
+        setError("Credenciais inválidas. Verifique sua matrícula/e-mail e senha.");
+      } else if (err.code === "auth/too-many-requests") {
+        setError("Muitas tentativas. Tente novamente em alguns minutos.");
       } else {
-        setError("Erro ao autenticar. Tente novamente mais tarde.");
+        setError("Erro ao autenticar. Verifique sua conexão ou tente novamente.");
       }
     } finally {
       setLoading(false);
@@ -107,7 +109,7 @@ export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
           <div className="space-y-2">
             <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">Senha Secreta</label>
             <div className="relative group">
-              <Lock className={`absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 transition-colors ${activeTab === "aluno" ? "group-focus-within:text-mult-orange" : "group-focus-within:text-neon-blue"}`} />
+              <LockIcon className={`absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 transition-colors ${activeTab === "aluno" ? "group-focus-within:text-mult-orange" : "group-focus-within:text-neon-blue"}`} />
               <input
                 type="password"
                 required

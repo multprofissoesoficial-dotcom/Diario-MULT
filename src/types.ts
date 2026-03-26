@@ -14,6 +14,7 @@ export interface UserProfile {
   codigo?: string; // Registration code for students
   role: UserRole;
   franquiaId?: string; // Master doesn't necessarily have one
+  turma?: string; // Class group
   xp: number;
   unlockedBadges: string[];
   createdAt: string;
@@ -24,6 +25,7 @@ export interface Mission {
   studentId: string;
   studentName: string;
   franquiaId: string;
+  turma?: string; // Class group
   module: string;
   classNum: number;
   content: string;

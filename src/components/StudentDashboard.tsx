@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState, useEffect } from "react";
 import { collection, addDoc, query, where, orderBy, onSnapshot, doc, updateDoc, arrayUnion } from "firebase/firestore";
 import { db } from "../firebase";
@@ -15,7 +17,7 @@ import {
   Rocket,
   Globe,
   Briefcase,
-  Presentation,
+  Presentation as PresentationIcon,
   Database,
   LogOut
 } from "lucide-react";
@@ -23,11 +25,11 @@ import { fireConfetti } from "../lib/confetti";
 import { cn } from "../lib/utils";
 import { auth } from "../firebase";
 
-const iconMap: any = {
+const iconMap: Record<string, React.ElementType> = {
   Rocket,
   Globe,
   Briefcase,
-  Presentation,
+  Presentation: PresentationIcon,
   Database
 };
 
@@ -116,6 +118,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
           studentId: profile.uid,
           studentName: profile.displayName,
           franquiaId: profile.franquiaId,
+          turma: profile.turma || "024inf",
           module,
           classNum,
           content,
@@ -163,7 +166,11 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
                 transition={{ repeat: Infinity, duration: 3 }}
                 className="w-32 h-32 bg-mult-orange/20 rounded-full flex items-center justify-center mx-auto neon-glow-orange border-2 border-mult-orange/50"
               >
-                {React.createElement(iconMap[newBadge.icon], { className: "w-16 h-16 text-mult-orange" })}
+                {iconMap[newBadge.icon] ? (
+                  React.createElement(iconMap[newBadge.icon], { className: "w-16 h-16 text-mult-orange" })
+                ) : (
+                  <Trophy className="w-16 h-16 text-mult-orange" />
+                )}
               </motion.div>
 
               <div className="space-y-2">
@@ -250,7 +257,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
             </h3>
             <div className="grid grid-cols-4 sm:grid-cols-5 gap-3 sm:gap-4">
               {BADGES.map((badge) => {
-                const Icon = iconMap[badge.icon];
+                const Icon = iconMap[badge.icon] || Trophy;
                 const isUnlocked = profile.unlockedBadges.includes(badge.id);
                 return (
                   <div 
