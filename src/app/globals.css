@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@config "../../tailwind.config.ts";
 
 @theme {
   --color-mult-orange: #FF6B00;
