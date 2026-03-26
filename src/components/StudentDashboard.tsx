@@ -23,7 +23,7 @@ import {
   FileText
 } from "lucide-react";
 import { fireConfetti } from "../lib/confetti";
-import { cn } from "../lib/utils";
+import { cn, handleFirestoreError, OperationType } from "../lib/utils";
 import { auth } from "../firebase";
 
 const iconMap: Record<string, React.ElementType> = {
@@ -74,6 +74,8 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
       
       // Check for new badges based on class completion
       checkBadges(missionData);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, "missions");
     });
 
     return () => unsubscribe();
@@ -134,7 +136,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
         setAiFeedback(feedback);
         setTimeout(() => setAiFeedback(null), 5000);
       } catch (err) {
-        console.error(err);
+        handleFirestoreError(err, OperationType.WRITE, "missions");
       } finally {
         setLoading(false);
       }

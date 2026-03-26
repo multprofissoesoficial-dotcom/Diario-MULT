@@ -12,8 +12,8 @@ import {
 import { db } from "../firebase";
 import { Mission, UserProfile } from "../types";
 import { motion, AnimatePresence } from "motion/react";
-import { Clock, FileText, CheckCircle, Zap, X, Calendar } from "lucide-react";
-import { cn } from "../lib/utils";
+import { Clock, FileText, CheckCircle, Zap, X, Calendar, AlertCircle } from "lucide-react";
+import { handleFirestoreError, OperationType, cn } from "../lib/utils";
 
 interface MissionHistoryModalProps {
   student: UserProfile;
@@ -23,6 +23,7 @@ interface MissionHistoryModalProps {
 export default function MissionHistoryModal({ student, onClose }: MissionHistoryModalProps) {
   const [missions, setMissions] = useState<Mission[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedMission, setSelectedMission] = useState<Mission | null>(null);
 
   useEffect(() => {
@@ -38,7 +39,11 @@ export default function MissionHistoryModal({ student, onClose }: MissionHistory
         const snap = await getDocs(q);
         setMissions(snap.docs.map(d => ({ id: d.id, ...d.data() } as Mission)));
       } catch (err) {
-        console.error("Error fetching student missions:", err);
+        try {
+          handleFirestoreError(err, OperationType.GET, "missions");
+        } catch (e: any) {
+          setError("Erro de permissão ao acessar histórico.");
+        }
       } finally {
         setLoading(false);
       }
@@ -84,6 +89,11 @@ export default function MissionHistoryModal({ student, onClose }: MissionHistory
               <div className="flex flex-col items-center justify-center py-20 gap-3">
                 <div className="w-8 h-8 border-4 border-mult-orange border-t-transparent rounded-full animate-spin"></div>
                 <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Carregando...</p>
+              </div>
+            ) : error ? (
+              <div className="text-center py-20 px-4 space-y-2">
+                <AlertCircle className="w-8 h-8 text-red-500 mx-auto" />
+                <p className="text-xs text-red-500 font-bold uppercase tracking-widest">{error}</p>
               </div>
             ) : missions.length === 0 ? (
               <div className="text-center py-20 space-y-2">

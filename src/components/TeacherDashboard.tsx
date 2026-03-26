@@ -85,7 +85,7 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
       setLastMissionDoc(snap.docs[snap.docs.length - 1]);
       setHasMoreMissions(snap.docs.length === studentsPerPage);
     } catch (err: any) {
-      console.error("Error fetching missions:", err);
+      handleFirestoreError(err, OperationType.GET, "missions");
     } finally {
       setLoading(false);
     }
@@ -132,7 +132,7 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
       setLastStudentDoc(snap.docs[snap.docs.length - 1]);
       setHasMoreStudents(snap.docs.length === studentsPerPage);
     } catch (err: any) {
-      console.error("Error fetching students:", err);
+      handleFirestoreError(err, OperationType.GET, "users");
     } finally {
       setLoading(false);
     }

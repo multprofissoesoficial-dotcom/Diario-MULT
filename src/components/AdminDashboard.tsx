@@ -148,7 +148,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       setLastDoc(snap.docs[snap.docs.length - 1]);
       setHasMore(snap.docs.length === usersPerPage);
     } catch (err: any) {
-      console.error("Error fetching users:", err);
+      handleFirestoreError(err, OperationType.GET, "users");
     } finally {
       setLoading(false);
     }
@@ -216,7 +216,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       setLastMissionDoc(snap.docs[snap.docs.length - 1]);
       setHasMoreMissions(snap.docs.length === usersPerPage);
     } catch (err: any) {
-      console.error("Error fetching missions:", err);
+      handleFirestoreError(err, OperationType.GET, "missions");
     } finally {
       setLoading(false);
     }
