@@ -25,6 +25,7 @@ import { db, auth } from "../firebase";
 import { handleFirestoreError, OperationType, cn } from "../lib/utils";
 import firebaseConfig from "../../firebase-applet-config.json";
 import { UserProfile, Franquia, Mission } from "../types";
+import MissionHistoryModal from "./MissionHistoryModal";
 import { ROLES_LABELS, RANKS } from "../constants";
 import { motion, AnimatePresence } from "motion/react";
 import Papa from "papaparse";
@@ -47,6 +48,7 @@ import {
   AlertCircle,
   Trash2,
   Clock,
+  Eye,
   Lock as LockIcon
 } from "lucide-react";
 
@@ -60,6 +62,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [importText, setImportText] = useState("");
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [showEditUser, setShowEditUser] = useState<UserProfile | null>(null);
+  const [showMissionHistory, setShowMissionHistory] = useState<UserProfile | null>(null);
   const [showAddFranquia, setShowAddFranquia] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -875,6 +878,15 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                     </td>
                     <td className="px-4 sm:px-6 py-4 text-right shrink-0">
                       <div className="flex justify-end gap-2">
+                        {userItem.role === "aluno" && (
+                          <button 
+                            onClick={() => setShowMissionHistory(userItem)}
+                            className="p-1.5 sm:p-2 rounded-lg bg-white/5 hover:bg-neon-blue/20 hover:text-neon-blue transition-all text-gray-600"
+                            title="Ver Histórico de Missões"
+                          >
+                            <Eye className="w-3.5 h-3.5 sm:w-4 h-4" />
+                          </button>
+                        )}
                         <button 
                           onClick={() => handleResetPassword(userItem.email)}
                           className="p-1.5 sm:p-2 rounded-lg bg-white/5 hover:bg-mult-orange/20 hover:text-mult-orange transition-all text-gray-600"
@@ -1062,6 +1074,12 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
       {/* Modals */}
       <AnimatePresence>
+        {showMissionHistory && (
+          <MissionHistoryModal 
+            student={showMissionHistory} 
+            onClose={() => setShowMissionHistory(null)} 
+          />
+        )}
         {showImportModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <motion.div 

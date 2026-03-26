@@ -20,9 +20,10 @@ import { db } from "../firebase";
 import { Mission, UserProfile } from "../types";
 import { XP_PER_MISSION, XP_BONUS } from "../constants";
 import { motion, AnimatePresence } from "motion/react";
-import { CheckCircle, Zap, Clock, User as UserIcon, FileText, Search, Filter, LogOut, Rocket } from "lucide-react";
+import { CheckCircle, Zap, Clock, User as UserIcon, FileText, Search, Filter, LogOut, Rocket, UserPlus, Eye } from "lucide-react";
 import { auth } from "../firebase";
 import { handleFirestoreError, OperationType } from "../lib/utils";
+import MissionHistoryModal from "./MissionHistoryModal";
 
 export default function TeacherDashboard({ profile }: { profile: UserProfile }) {
   const [missions, setMissions] = useState<Mission[]>([]);
@@ -30,6 +31,17 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState<"missions" | "students">("missions");
   const [showEditStudent, setShowEditStudent] = useState<UserProfile | null>(null);
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [showMissionHistory, setShowMissionHistory] = useState<UserProfile | null>(null);
+  const [newUser, setNewUser] = useState({
+    nome: "",
+    email: "",
+    codigo: "",
+    senha: "",
+    role: "aluno" as any,
+    franquiaId: profile.franquiaId || "",
+    turma: ""
+  });
   const [filter, setFilter] = useState<"pending" | "all">("pending");
   const [turmaFilter, setTurmaFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -132,6 +144,47 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
     }
   };
 
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!newUser.nome || !newUser.senha) {
+      alert("Nome e Senha são obrigatórios.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const response = await fetch("/api/users/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newUser),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao criar usuário");
+      }
+
+      setNewUser({ 
+        nome: "", 
+        email: "", 
+        codigo: "", 
+        senha: "", 
+        role: "aluno", 
+        franquiaId: profile.franquiaId || "",
+        turma: ""
+      });
+      setShowAddUser(false);
+      fetchStudents(true);
+    } catch (err: any) {
+      console.error("Erro ao criar usuário:", err);
+      alert("Erro ao criar usuário: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleUpdateStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!showEditStudent) return;
@@ -223,7 +276,7 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
               </button>
             </div>
             <div className="h-4 w-px bg-white/10 mx-1 shrink-0 hidden sm:block" />
-            {view === "missions" && (
+            {view === "missions" ? (
               <div className="flex flex-col sm:flex-row gap-2 shrink-0 w-full sm:w-auto">
                 <div className="relative w-full sm:w-48">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
@@ -250,6 +303,13 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
                   </button>
                 </div>
               </div>
+            ) : (
+              <button 
+                onClick={() => setShowAddUser(true)}
+                className="bg-mult-orange hover:bg-mult-orange/90 text-white font-bold py-1.5 px-4 rounded-full transition-all text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 neon-glow-orange"
+              >
+                <UserPlus className="w-3.5 h-3.5" /> Novo Usuário
+              </button>
             )}
           </div>
         </div>
@@ -400,12 +460,22 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
                       </td>
                       <td className="px-4 sm:px-6 py-4 font-bold text-sm text-neon-blue shrink-0">{student.xp} XP</td>
                       <td className="px-4 sm:px-6 py-4 text-right shrink-0">
-                        <button 
-                          onClick={() => setShowEditStudent(student)}
-                          className="p-2 rounded-lg bg-white/5 hover:bg-mult-orange/20 hover:text-mult-orange transition-all text-gray-600"
-                        >
-                          <FileText className="w-4 h-4" />
-                        </button>
+                        <div className="flex justify-end gap-2">
+                          <button 
+                            onClick={() => setShowMissionHistory(student)}
+                            className="p-2 rounded-lg bg-white/5 hover:bg-neon-blue/20 hover:text-neon-blue transition-all text-gray-600"
+                            title="Ver Histórico de Missões"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => setShowEditStudent(student)}
+                            className="p-2 rounded-lg bg-white/5 hover:bg-mult-orange/20 hover:text-mult-orange transition-all text-gray-600"
+                            title="Editar XP"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -475,6 +545,100 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
               </form>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+      {/* Add User Modal */}
+      <AnimatePresence>
+        {showAddUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="glass-card w-full max-w-md p-8 space-y-6 relative"
+            >
+              <h2 className="text-2xl font-black tracking-tighter uppercase">NOVO <span className="text-mult-orange">ALUNO</span></h2>
+              <form onSubmit={handleCreateUser} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Nome Completo</label>
+                  <input 
+                    required
+                    type="text"
+                    value={newUser.nome}
+                    onChange={e => setNewUser({...newUser, nome: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-mult-orange"
+                    placeholder="Nome do aluno"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">E-mail (Opcional)</label>
+                  <input 
+                    type="email"
+                    value={newUser.email}
+                    onChange={e => setNewUser({...newUser, email: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-mult-orange"
+                    placeholder="email@exemplo.com"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Código/Matrícula</label>
+                  <input 
+                    type="text"
+                    value={newUser.codigo}
+                    onChange={e => setNewUser({...newUser, codigo: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-mult-orange"
+                    placeholder="Ex: 123456"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Senha de Acesso</label>
+                  <input 
+                    required
+                    type="password"
+                    value={newUser.senha}
+                    onChange={e => setNewUser({...newUser, senha: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-mult-orange"
+                    placeholder="Senha inicial"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Turma</label>
+                  <input 
+                    type="text"
+                    value={newUser.turma}
+                    onChange={e => setNewUser({...newUser, turma: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-mult-orange"
+                    placeholder="Ex: Turma A"
+                  />
+                </div>
+                <div className="flex gap-2 pt-4">
+                  <button 
+                    type="button"
+                    onClick={() => setShowAddUser(false)}
+                    className="flex-1 bg-white/5 text-white font-bold py-3 rounded-xl transition-all"
+                  >
+                    CANCELAR
+                  </button>
+                  <button 
+                    disabled={loading}
+                    className="flex-1 bg-mult-orange text-white font-bold py-3 rounded-xl transition-all neon-glow-orange disabled:opacity-50"
+                  >
+                    {loading ? "CRIANDO..." : "CRIAR ALUNO"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Mission History Modal */}
+      <AnimatePresence>
+        {showMissionHistory && (
+          <MissionHistoryModal 
+            student={showMissionHistory} 
+            onClose={() => setShowMissionHistory(null)} 
+          />
         )}
       </AnimatePresence>
     </div>

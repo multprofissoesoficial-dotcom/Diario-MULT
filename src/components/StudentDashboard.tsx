@@ -19,7 +19,8 @@ import {
   Briefcase,
   Presentation as PresentationIcon,
   Database,
-  LogOut
+  LogOut,
+  FileText
 } from "lucide-react";
 import { fireConfetti } from "../lib/confetti";
 import { cn } from "../lib/utils";
@@ -58,6 +59,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
   const [loading, setLoading] = useState(false);
   const [aiFeedback, setAiFeedback] = useState<string | null>(null);
   const [newBadge, setNewBadge] = useState<Badge | null>(null);
+  const [selectedMission, setSelectedMission] = useState<Mission | null>(null);
 
   useEffect(() => {
     const q = query(
@@ -367,7 +369,8 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
                   key={mission.id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="glass-card p-4 flex items-center justify-between group hover:border-neon-blue/30 transition-all"
+                  onClick={() => setSelectedMission(mission)}
+                  className="glass-card p-4 flex items-center justify-between group hover:border-neon-blue/30 transition-all cursor-pointer"
                 >
                   <div className="flex items-center gap-3 sm:gap-4">
                     <div className={cn(
@@ -398,6 +401,95 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
           </div>
         </div>
       </div>
+      {/* Mission Detail Modal */}
+      <AnimatePresence>
+        {selectedMission && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="glass-card w-full max-w-2xl overflow-hidden relative"
+            >
+              {/* Modal Header */}
+              <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
+                <div>
+                  <h2 className="text-xl font-black tracking-tighter uppercase">DIÁRIO DE <span className="text-mult-orange">BORDO</span></h2>
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mt-1">
+                    {selectedMission.module} • Aula {selectedMission.classNum}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setSelectedMission(null)}
+                  className="p-2 rounded-full hover:bg-white/10 transition-colors text-gray-400"
+                >
+                  <LogOut className="w-5 h-5 rotate-180" />
+                </button>
+              </div>
+
+              {/* Modal Content */}
+              <div className="p-8 space-y-6 max-h-[70vh] overflow-y-auto custom-scrollbar">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-mult-orange/20 flex items-center justify-center text-mult-orange neon-glow-orange">
+                      <Clock className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Data da Missão</p>
+                      <p className="text-sm font-bold">{new Date(selectedMission.createdAt).toLocaleString('pt-BR')}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Status</p>
+                    <div className={cn(
+                      "text-xs font-black uppercase tracking-widest px-3 py-1 rounded-full border mt-1",
+                      selectedMission.status === 'approved' || selectedMission.status === 'bonus' 
+                        ? "bg-neon-blue/10 text-neon-blue border-neon-blue/20" 
+                        : "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
+                    )}>
+                      {selectedMission.status === 'approved' ? 'Aprovada' : selectedMission.status === 'bonus' ? 'Bônus' : 'Pendente'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-gray-400">
+                    <FileText className="w-4 h-4" />
+                    <span className="text-[10px] font-black uppercase tracking-widest">Relato da Missão</span>
+                  </div>
+                  <div className="bg-white/5 rounded-2xl p-6 border border-white/10 min-h-[200px]">
+                    <p className="text-gray-300 leading-relaxed whitespace-pre-wrap italic">
+                      "{selectedMission.content}"
+                    </p>
+                  </div>
+                </div>
+
+                {selectedMission.xpAwarded && (
+                  <div className="flex items-center gap-4 p-4 bg-neon-blue/10 rounded-xl border border-neon-blue/20">
+                    <div className="w-10 h-10 rounded-lg bg-neon-blue/20 flex items-center justify-center text-neon-blue neon-glow-blue">
+                      <Zap className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">XP Conquistado</p>
+                      <p className="text-lg font-black text-neon-blue">+{selectedMission.xpAwarded} XP</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-6 border-t border-white/10 bg-white/5 flex justify-end">
+                <button 
+                  onClick={() => setSelectedMission(null)}
+                  className="px-8 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-black uppercase tracking-widest text-xs transition-all"
+                >
+                  Fechar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
