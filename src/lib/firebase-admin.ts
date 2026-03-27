@@ -1,8 +1,11 @@
 import * as admin from "firebase-admin";
+import firebaseConfig from "../../firebase-applet-config.json";
 
-const projectId = process.env.FIREBASE_PROJECT_ID;
+const projectId = process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId;
 const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
 const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+const databaseId = firebaseConfig.firestoreDatabaseId;
+console.log(`Using Firestore Database ID: ${databaseId}`);
 
 if (!admin.apps.length) {
   try {
@@ -25,5 +28,5 @@ if (!admin.apps.length) {
   }
 }
 
-export const adminDb = admin.apps.length ? admin.firestore() : null;
+export const adminDb = admin.apps.length ? admin.firestore(databaseId) : null;
 export const adminAuth = admin.apps.length ? admin.auth() : null;

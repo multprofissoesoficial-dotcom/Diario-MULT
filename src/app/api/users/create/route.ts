@@ -23,20 +23,24 @@ export async function POST(request: Request) {
     }
 
     const callerUid = decodedToken.uid;
+    console.log(`Caller UID: ${callerUid}`);
     let callerDoc;
     try {
       callerDoc = await adminDb.collection("users").doc(callerUid).get();
     } catch (err) {
-      return NextResponse.json({ error: "Não autorizado" }, { status: 403 });
+      console.error("Error fetching caller doc:", err);
+      return NextResponse.json({ error: "Não autorizado (erro ao buscar perfil)" }, { status: 403 });
     }
-
+ 
     if (!callerDoc.exists) {
-      return NextResponse.json({ error: "Não autorizado" }, { status: 403 });
+      console.warn(`Caller doc not found for UID: ${callerUid}`);
+      return NextResponse.json({ error: "Não autorizado (perfil não encontrado)" }, { status: 403 });
     }
-
+ 
     const callerData = callerDoc.data();
+    console.log(`Caller Role: ${callerData?.role}`);
     if (!callerData || !["master", "coordenador", "professor"].includes(callerData.role)) {
-      return NextResponse.json({ error: "Não autorizado" }, { status: 403 });
+      return NextResponse.json({ error: "Não autorizado (permissão insuficiente)" }, { status: 403 });
     }
 
     const body = await request.json();
