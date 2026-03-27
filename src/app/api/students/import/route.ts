@@ -65,15 +65,24 @@ export async function POST(request: Request) {
 
           let userRecord;
           try {
-            userRecord = await adminAuth.createUser({
-              email: finalEmail,
-              password: senha || String(codigo) || "nome123",
-              displayName: nome,
-            });
+            // Check if user already exists in Auth
+            userRecord = await adminAuth.getUserByEmail(finalEmail);
           } catch (authErr: any) {
-            if (authErr.code === "auth/email-already-in-use") {
-              userRecord = await adminAuth.getUserByEmail(finalEmail);
+            // If user not found, create it
+            if (authErr.code === "auth/user-not-found" || authErr.message?.includes("NOT_FOUND")) {
+              try {
+                userRecord = await adminAuth.createUser({
+                  email: finalEmail,
+                  password: senha || String(codigo) || "nome123",
+                  displayName: nome,
+                });
+              } catch (createErr: any) {
+                console.error(`Error creating user ${finalEmail}:`, createErr);
+                results.errors++;
+                return;
+              }
             } else {
+              // Re-throw other auth errors to be caught by the outer try-catch
               throw authErr;
             }
           }

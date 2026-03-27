@@ -381,6 +381,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       };
     });
 
+    setImportProgress({ current: 0, total: studentsToImport.length });
+
     try {
       const response = await fetch("/api/students/import", {
         method: "POST",

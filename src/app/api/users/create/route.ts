@@ -27,14 +27,21 @@ export async function POST(request: Request) {
 
     let userRecord;
     try {
-      userRecord = await adminAuth.createUser({
-        email: finalEmail,
-        password: senha,
-        displayName: nome,
-      });
+      // Check if user already exists in Auth
+      userRecord = await adminAuth.getUserByEmail(finalEmail);
     } catch (error: any) {
-      if (error.code === "auth/email-already-in-use") {
-        userRecord = await adminAuth.getUserByEmail(finalEmail);
+      // If user not found, create it
+      if (error.code === "auth/user-not-found" || error.message?.includes("NOT_FOUND")) {
+        try {
+          userRecord = await adminAuth.createUser({
+            email: finalEmail,
+            password: senha,
+            displayName: nome,
+          });
+        } catch (createErr: any) {
+          console.error("Error creating user:", createErr);
+          return NextResponse.json({ error: "Erro ao criar usuário." }, { status: 500 });
+        }
       } else {
         throw error;
       }
