@@ -384,9 +384,13 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     setImportProgress({ current: 0, total: studentsToImport.length });
 
     try {
+      const token = await auth.currentUser?.getIdToken();
       const response = await fetch("/api/students/import", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
         body: JSON.stringify({ students: studentsToImport }),
       });
 
@@ -428,9 +432,13 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     setSuccessMsg("");
 
     try {
+      const token = await auth.currentUser?.getIdToken();
       const response = await fetch("/api/users/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
         body: JSON.stringify(newUser),
       });
 

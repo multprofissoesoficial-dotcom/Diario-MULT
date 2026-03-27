@@ -156,9 +156,13 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
     setLoading(true);
 
     try {
+      const token = await auth.currentUser?.getIdToken();
       const response = await fetch("/api/users/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
         body: JSON.stringify(newUser),
       });
 
