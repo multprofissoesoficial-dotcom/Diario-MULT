@@ -9,6 +9,36 @@ export async function POST(request: Request) {
     );
   }
   try {
+    const authHeader = request.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+    }
+
+    const token = authHeader.split("Bearer ")[1];
+    let decodedToken;
+    try {
+      decodedToken = await adminAuth.verifyIdToken(token);
+    } catch (error) {
+      return NextResponse.json({ error: "Token inválido" }, { status: 401 });
+    }
+
+    const callerUid = decodedToken.uid;
+    let callerDoc;
+    try {
+      callerDoc = await adminDb.collection("users").doc(callerUid).get();
+    } catch (err) {
+      return NextResponse.json({ error: "Não autorizado" }, { status: 403 });
+    }
+
+    if (!callerDoc.exists) {
+      return NextResponse.json({ error: "Não autorizado" }, { status: 403 });
+    }
+
+    const callerData = callerDoc.data();
+    if (!callerData || !["master", "coordenador", "professor"].includes(callerData.role)) {
+      return NextResponse.json({ error: "Não autorizado" }, { status: 403 });
+    }
+
     const body = await request.json();
     const { nome, email, codigo, senha, role, franquiaId, turma } = body;
 
@@ -43,7 +73,9 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "Erro ao criar usuário." }, { status: 500 });
         }
       } else {
-        throw error;
+        // Log and return error for other auth issues
+        console.error("Auth error:", error);
+        return NextResponse.json({ error: "Erro na verificação de autenticação." }, { status: 500 });
       }
     }
 
@@ -60,6 +92,7 @@ export async function POST(request: Request) {
       createdAt: new Date().toISOString(),
     };
 
+    // Rule 1: Use .set with merge: true
     await adminDb.collection("users").doc(userRecord.uid).set(userData, { merge: true });
 
     return NextResponse.json({ success: true, uid: userRecord.uid });

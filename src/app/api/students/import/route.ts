@@ -9,6 +9,36 @@ export async function POST(request: Request) {
     );
   }
   try {
+    const authHeader = request.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+    }
+
+    const token = authHeader.split("Bearer ")[1];
+    let decodedToken;
+    try {
+      decodedToken = await adminAuth.verifyIdToken(token);
+    } catch (error) {
+      return NextResponse.json({ error: "Token inválido" }, { status: 401 });
+    }
+
+    const callerUid = decodedToken.uid;
+    let callerDoc;
+    try {
+      callerDoc = await adminDb.collection("users").doc(callerUid).get();
+    } catch (err) {
+      return NextResponse.json({ error: "Não autorizado" }, { status: 403 });
+    }
+
+    if (!callerDoc.exists) {
+      return NextResponse.json({ error: "Não autorizado" }, { status: 403 });
+    }
+
+    const callerData = callerDoc.data();
+    if (!callerData || !["master", "coordenador", "professor"].includes(callerData.role)) {
+      return NextResponse.json({ error: "Não autorizado" }, { status: 403 });
+    }
+
     const { students } = await request.json();
 
     if (!Array.isArray(students)) {
@@ -68,7 +98,7 @@ export async function POST(request: Request) {
             // Check if user already exists in Auth
             userRecord = await adminAuth.getUserByEmail(finalEmail);
           } catch (authErr: any) {
-            // If user not found, create it
+            // Rule 2: If user not found, create it
             if (authErr.code === "auth/user-not-found" || authErr.message?.includes("NOT_FOUND")) {
               try {
                 userRecord = await adminAuth.createUser({
@@ -82,12 +112,15 @@ export async function POST(request: Request) {
                 return;
               }
             } else {
-              // Re-throw other auth errors to be caught by the outer try-catch
-              throw authErr;
+              // Log other auth errors
+              console.error(`Auth error for ${finalEmail}:`, authErr);
+              results.errors++;
+              return;
             }
           }
 
           const userRef = adminDb.collection("users").doc(userRecord.uid);
+          // Rule 1: Use batch.set with merge: true
           batch.set(userRef, {
             uid: userRecord.uid,
             displayName: nome,
