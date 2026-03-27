@@ -4,7 +4,8 @@ import React, { useState, useEffect } from "react";
 import { collection, addDoc, query, where, orderBy, onSnapshot, doc, updateDoc, arrayUnion } from "firebase/firestore";
 import { db } from "../firebase";
 import { UserProfile, Mission, Badge } from "../types";
-import { MODULES, CLASSES, RANKS, BADGES } from "../constants";
+import { RANKS, BADGES } from "../constants";
+import { getAbsoluteLessonId, getRelativeLesson, getLessonsForModule } from "../utils/lessonMapper";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   User as UserIcon, 
@@ -52,7 +53,7 @@ function XPCounter({ value }: { value: number }) {
 }
 
 export default function StudentDashboard({ profile }: { profile: UserProfile }) {
-  const [module, setModule] = useState(MODULES[0]);
+  const [module, setModule] = useState("Windows");
   const [classNum, setClassNum] = useState(1);
   const [content, setContent] = useState("");
   const [missions, setMissions] = useState<Mission[]>([]);
@@ -118,18 +119,18 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
       }
 
       try {
-        await addDoc(collection(db, "missions"), {
-          studentId: profile.uid,
-          studentName: profile.displayName,
-          franquiaId: profile.franquiaId,
-          turma: profile.turma || "024inf",
-          module,
-          classNum,
-          content,
-          status: "pending",
-          aiFeedback: feedback,
-          createdAt: new Date().toISOString(),
-        });
+          await addDoc(collection(db, "missions"), {
+            studentId: profile.uid,
+            studentName: profile.displayName,
+            franquiaId: profile.franquiaId,
+            turma: profile.turma || "024inf",
+            module,
+            classNum: getAbsoluteLessonId(module, classNum),
+            content,
+            status: "pending",
+            aiFeedback: feedback,
+            createdAt: new Date().toISOString(),
+          });
 
         fireConfetti();
         setContent("");
@@ -303,10 +304,13 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
                   <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Módulo</label>
                   <select 
                     value={module}
-                    onChange={(e) => setModule(e.target.value)}
+                    onChange={(e) => {
+                      setModule(e.target.value);
+                      setClassNum(1); // Reset class when module changes
+                    }}
                     className="w-full bg-white/5 border border-white/10 rounded-lg p-3 focus:outline-none focus:border-neon-blue text-white"
                   >
-                    {MODULES.map(m => <option key={m} value={m} className="bg-cockpit-bg">{m}</option>)}
+                    {["Windows", "Internet", "Word", "PowerPoint", "Excel"].map(m => <option key={m} value={m} className="bg-cockpit-bg">{m}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1">
@@ -316,7 +320,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
                     onChange={(e) => setClassNum(Number(e.target.value))}
                     className="w-full bg-white/5 border border-white/10 rounded-lg p-3 focus:outline-none focus:border-neon-blue text-white"
                   >
-                    {CLASSES.map(c => <option key={c} value={c} className="bg-cockpit-bg">Aula {c}</option>)}
+                    {getLessonsForModule(module).map(c => <option key={c} value={c} className="bg-cockpit-bg">Aula {c}</option>)}
                   </select>
                 </div>
               </div>
@@ -382,7 +386,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
                       {mission.status === "pending" ? <Clock className="w-4 h-4 sm:w-5 sm:h-5" /> : <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5" />}
                     </div>
                     <div className="min-w-0">
-                      <h4 className="font-bold text-xs sm:text-sm truncate">{mission.module} - Aula {mission.classNum}</h4>
+                      <h4 className="font-bold text-xs sm:text-sm truncate">{getRelativeLesson(mission.classNum).label}</h4>
                       <p className="text-[10px] sm:text-xs text-gray-500">{new Date(mission.createdAt).toLocaleDateString()}</p>
                     </div>
                   </div>
@@ -418,7 +422,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
                 <div>
                   <h2 className="text-xl font-black tracking-tighter uppercase">DIÁRIO DE <span className="text-mult-orange">BORDO</span></h2>
                   <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mt-1">
-                    {selectedMission.module} • Aula {selectedMission.classNum}
+                    {getRelativeLesson(selectedMission.classNum).label}
                   </p>
                 </div>
                 <button 

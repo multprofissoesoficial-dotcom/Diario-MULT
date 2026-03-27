@@ -23,6 +23,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle, Zap, Clock, User as UserIcon, FileText, Search, Filter, LogOut, Rocket, UserPlus, Eye } from "lucide-react";
 import { auth } from "../firebase";
 import { handleFirestoreError, OperationType } from "../lib/utils";
+import { getRelativeLesson } from "../utils/lessonMapper";
 import MissionHistoryModal from "./MissionHistoryModal";
 
 export default function TeacherDashboard({ profile }: { profile: UserProfile }) {
@@ -338,7 +339,7 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
                         <div>
                           <h4 className="font-bold text-base sm:text-lg leading-tight">{mission.studentName}</h4>
                           <p className="text-[10px] sm:text-xs text-gray-500 uppercase tracking-widest font-bold">
-                            {mission.module} • Aula {mission.classNum}
+                            {getRelativeLesson(mission.classNum).label}
                           </p>
                         </div>
                       </div>

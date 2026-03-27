@@ -25,6 +25,7 @@ import { db, auth } from "../firebase";
 import { handleFirestoreError, OperationType, cn } from "../lib/utils";
 import firebaseConfig from "../../firebase-applet-config.json";
 import { UserProfile, Franquia, Mission } from "../types";
+import { getRelativeLesson } from "../utils/lessonMapper";
 import MissionHistoryModal from "./MissionHistoryModal";
 import { ROLES_LABELS, RANKS } from "../constants";
 import { motion, AnimatePresence } from "motion/react";
@@ -503,7 +504,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
     const csvData = filteredMissions.map(m => ({
       "Aluno": m.studentName,
-      "Atividade": `${m.module} - Aula ${m.classNum}`,
+      "Atividade": getRelativeLesson(m.classNum).label,
       "Data": m.createdAt ? new Date(m.createdAt).toLocaleDateString("pt-BR") : "N/A",
       "Status": m.status === "approved" ? "Aprovado" : m.status === "pending" ? "Pendente" : m.status === "bonus" ? "Bônus" : "Rejeitado",
       "XP": m.xpAwarded || 0,
@@ -1016,7 +1017,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                       <p className="font-bold text-xs sm:text-sm">{mission.studentName}</p>
                     </td>
                     <td className="px-6 py-4">
-                      <p className="text-xs font-medium text-gray-300">{mission.module} - Aula {mission.classNum}</p>
+                      <p className="text-xs font-medium text-gray-300">{getRelativeLesson(mission.classNum).label}</p>
                     </td>
                     <td className="px-6 py-4">
                       <p className="text-[10px] font-mono text-gray-500">

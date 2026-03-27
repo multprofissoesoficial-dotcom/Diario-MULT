@@ -14,6 +14,7 @@ import { Mission, UserProfile } from "../types";
 import { motion, AnimatePresence } from "motion/react";
 import { Clock, FileText, CheckCircle, Zap, X, Calendar, AlertCircle } from "lucide-react";
 import { handleFirestoreError, OperationType, cn } from "../lib/utils";
+import { getRelativeLesson } from "../utils/lessonMapper";
 
 interface MissionHistoryModalProps {
   student: UserProfile;
@@ -113,10 +114,11 @@ export default function MissionHistoryModal({ student, onClose }: MissionHistory
                   )}
                 >
                   <div className="flex justify-between items-start">
-                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Aula {mission.classNum}</span>
+                    <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
+                      {getRelativeLesson(mission.classNum).label}
+                    </span>
                     <span className="text-[9px] font-mono text-gray-600">{new Date(mission.createdAt).toLocaleDateString()}</span>
                   </div>
-                  <h4 className="font-bold text-sm truncate">{mission.module}</h4>
                   <div className="flex items-center gap-2 mt-1">
                     <div className={cn(
                       "w-2 h-2 rounded-full",
@@ -142,15 +144,13 @@ export default function MissionHistoryModal({ student, onClose }: MissionHistory
               >
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                   <div>
-                    <h3 className="text-2xl font-black tracking-tighter uppercase">{selectedMission.module}</h3>
+                    <h3 className="text-2xl font-black tracking-tighter uppercase">
+                      {getRelativeLesson(selectedMission.classNum).label}
+                    </h3>
                     <div className="flex items-center gap-4 mt-2">
                       <div className="flex items-center gap-2 text-gray-500">
                         <Calendar className="w-4 h-4" />
                         <span className="text-xs font-bold">{new Date(selectedMission.createdAt).toLocaleString('pt-BR')}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-gray-500">
-                        <Clock className="w-4 h-4" />
-                        <span className="text-xs font-bold">Aula {selectedMission.classNum}</span>
                       </div>
                     </div>
                   </div>
