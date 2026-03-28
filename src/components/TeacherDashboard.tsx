@@ -62,7 +62,6 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
       let q = query(
         collection(db, "missions"), 
         where("franquiaId", "==", profile.franquiaId),
-        orderBy("createdAt", "desc"),
         limit(studentsPerPage)
       );
 
@@ -109,7 +108,6 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
         collection(db, "users"), 
         where("role", "==", "aluno"), 
         where("franquiaId", "==", profile.franquiaId),
-        orderBy("displayName"),
         limit(studentsPerPage)
       );
 

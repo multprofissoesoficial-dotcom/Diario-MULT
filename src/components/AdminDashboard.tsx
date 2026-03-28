@@ -113,7 +113,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const fetchUsers = async (reset = false) => {
     setLoading(true);
     try {
-      let q = query(collection(db, "users"), orderBy("displayName"), limit(usersPerPage));
+      let q = query(collection(db, "users"), limit(usersPerPage));
       
       if (profile.role !== "master") {
         q = query(q, where("franquiaId", "==", profile.franquiaId));
@@ -185,7 +185,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const fetchMissions = async (reset = false) => {
     setLoading(true);
     try {
-      let q = query(collection(db, "missions"), orderBy("createdAt", "desc"), limit(usersPerPage));
+      let q = query(collection(db, "missions"), limit(usersPerPage));
       
       if (profile.role !== "master") {
         q = query(q, where("franquiaId", "==", profile.franquiaId));

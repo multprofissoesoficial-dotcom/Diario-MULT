@@ -1,6 +1,12 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
     // Helper Functions
     function isAuthenticated() {
       return request.auth != null;
@@ -10,24 +16,42 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    function isMaster() {
-      return isAuthenticated() && (
-        request.auth.token.email == "faustodv@gmail.com" ||
-        request.auth.token.email == "multprofissoesoficial@gmail.com" ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'master')
-      );
-    }
-
-    function isCoordenador(franquiaId) {
-      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordenador' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId == franquiaId;
-    }
-
-    function isProfessor(franquiaId) {
-      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'professor' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId == franquiaId;
+    function isPCM() {
+      return isAuthenticated() && getUserData().role in ['master', 'coordenador', 'professor'];
     }
 
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isMaster() {
+      return isAuthenticated() && (
+        request.auth.token.email == "multprofissoesoficial@gmail.com" ||
+        getUserData().role == 'master'
+      );
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'role', 'xp', 'unlockedBadges', 'createdAt']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 128 &&
+             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() < 100 &&
+             data.email is string && data.email.size() > 0 && data.email.size() < 100 &&
+             data.role in ['master', 'coordenador', 'professor', 'aluno'] &&
+             data.xp is number &&
+             data.unlockedBadges is list && data.unlockedBadges.size() < 100 &&
+             data.createdAt is string;
+    }
+
+    function isValidMission(data) {
+      return data.keys().hasAll(['studentId', 'studentName', 'franquiaId', 'module', 'classNum', 'content', 'status', 'createdAt']) &&
+             data.studentId is string && data.studentId.size() < 128 &&
+             data.studentName is string && data.studentName.size() < 100 &&
+             data.franquiaId is string && data.franquiaId.size() < 128 &&
+             data.module is string && data.module.size() < 100 &&
+             data.classNum is number &&
+             data.content is string && data.content.size() < 5000 &&
+             data.status in ['pending', 'approved', 'bonus'] &&
+             data.createdAt is string;
     }
 
     // Franquias
@@ -38,30 +62,50 @@ service cloud.firestore {
 
     // Usuários
     match /users/{userId} {
-      allow read: if isAuthenticated() && (
-        isOwner(userId) || 
-        isMaster() || 
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordenador' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId == resource.data.franquiaId) ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'professor' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId == resource.data.franquiaId)
+      // Students can only GET their own document. They CANNOT LIST.
+      allow get: if isOwner(userId);
+      
+      // PCM can list and read any user in their franchise (or all if master)
+      allow list: if isPCM();
+      allow get: if isPCM() && (
+        getUserData().role == 'master' || 
+        getUserData().franquiaId == resource.data.franquiaId
       );
-      allow create: if isMaster() || (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordenador' && request.resource.data.franquiaId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId);
-      allow update: if isMaster() || 
-                    (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordenador' && resource.data.franquiaId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId) ||
-                    (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'professor' && resource.data.franquiaId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId) ||
-                    isOwner(userId);
+
+      // Create: Only master or coordinator (within franchise)
+      allow create: if (isMaster() || (
+        isAuthenticated() && getUserData().role == 'coordenador' && 
+        request.resource.data.franquiaId == getUserData().franquiaId &&
+        request.resource.data.role in ['professor', 'aluno']
+      )) && isValidUser(request.resource.data);
+
+      // Update: Owner (limited fields), Master, or PCM (within franchise)
+      allow update: if (
+        (isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.franquiaId == resource.data.franquiaId) || 
+        isMaster() || 
+        (isPCM() && resource.data.franquiaId == getUserData().franquiaId && (request.resource.data.role == resource.data.role || isMaster()))
+      ) && isValidUser(request.resource.data);
+
       allow delete: if isMaster();
     }
 
     // Missões (Diários)
     match /missions/{missionId} {
       allow read: if isAuthenticated() && (
-        isMaster() || 
-        resource.data.studentId == request.auth.uid ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['master', 'coordenador', 'professor'])
+        isPCM() || 
+        resource.data.studentId == request.auth.uid
       );
-      allow create: if isAuthenticated() && request.resource.data.studentId == request.auth.uid;
-      allow update: if isMaster() || (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId == resource.data.franquiaId && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordenador' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'professor'));
+      
+      allow create: if (
+        (isPCM() && request.resource.data.franquiaId == getUserData().franquiaId) || 
+        (isAuthenticated() && request.resource.data.studentId == request.auth.uid)
+      ) && isValidMission(request.resource.data);
+
+      allow update: if (
+        (isPCM() && resource.data.franquiaId == getUserData().franquiaId) || 
+        (isAuthenticated() && resource.data.studentId == request.auth.uid && request.resource.data.status == resource.data.status)
+      ) && isValidMission(request.resource.data);
+
       allow delete: if isMaster();
     }
   }

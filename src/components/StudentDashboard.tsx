@@ -65,8 +65,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
   useEffect(() => {
     const q = query(
       collection(db, "missions"),
-      where("studentId", "==", profile.uid),
-      orderBy("createdAt", "desc")
+      where("studentId", "==", profile.uid)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
