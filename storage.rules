@@ -1,0 +1,19 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /resumes/{userId}/{fileName} {
+      // Write: Apenas o usuário dono do ID pode fazer upload
+      // O arquivo deve ser menor que 5MB e ser PDF
+      allow write: if request.auth != null && 
+                   request.auth.uid == userId && 
+                   request.resource.size < 5 * 1024 * 1024 && 
+                   request.resource.contentType == 'application/pdf';
+      
+      // Read: Apenas o dono do currículo OU usuários com role master, coordenador ou rh
+      allow read: if request.auth != null && (
+                    request.auth.uid == userId || 
+                    firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role in ['master', 'coordenador', 'rh']
+                  );
+    }
+  }
+}

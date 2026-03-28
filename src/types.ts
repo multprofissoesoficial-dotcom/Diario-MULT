@@ -1,4 +1,23 @@
-export type UserRole = "master" | "coordenador" | "professor" | "aluno";
+export type UserRole = "master" | "coordenador" | "professor" | "aluno" | "rh";
+
+export type SkillTag = 
+  | 'Boa Comunicação' 
+  | 'Trabalho em Equipe' 
+  | 'Proatividade' 
+  | 'Organização' 
+  | 'Perfil Analítico' 
+  | 'Adaptabilidade' 
+  | 'Inteligência Emocional' 
+  | 'Foco em Resultados' 
+  | 'Informática Básica' 
+  | 'Pacote Office' 
+  | 'Atendimento ao Cliente' 
+  | 'Vendas e Negociação' 
+  | 'Inglês Básico' 
+  | 'Rotinas Administrativas' 
+  | 'Primeiro Emprego' 
+  | 'Disponibilidade Tarde/Noite' 
+  | 'Disponibilidade Manhã/Tarde';
 
 export interface Franquia {
   id: string;
@@ -17,7 +36,29 @@ export interface UserProfile {
   turma?: string; // Class group
   xp: number;
   unlockedBadges: string[];
+  resumeUrl?: string;
+  skills?: SkillTag[];
+  phone?: string;
   createdAt: string;
+}
+
+export interface JobPosting {
+  id: string;
+  title: string;
+  company: string;
+  description: string;
+  requiredSkills: SkillTag[];
+  status: 'aberta' | 'fechada';
+  createdAt: string;
+  createdByUid: string;
+}
+
+export interface Application {
+  id: string;
+  jobId: string;
+  studentId: string;
+  matchScore: number;
+  appliedAt: string;
 }
 
 export interface Mission {

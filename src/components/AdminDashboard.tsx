@@ -30,6 +30,7 @@ import MissionHistoryModal from "./MissionHistoryModal";
 import { ROLES_LABELS, RANKS } from "../constants";
 import { motion, AnimatePresence } from "motion/react";
 import Papa from "papaparse";
+import AtsDashboard from "./AtsDashboard";
 import { 
   Users, 
   Plus, 
@@ -50,7 +51,8 @@ import {
   Trash2,
   Clock,
   Eye,
-  Lock as LockIcon
+  Lock as LockIcon,
+  Briefcase
 } from "lucide-react";
 
 export default function AdminDashboard({ profile }: { profile: UserProfile }) {
@@ -75,7 +77,9 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [hasMore, setHasMore] = useState(true);
   const [pendingOnly, setPendingOnly] = useState(false);
   const [pendingMissions, setPendingMissions] = useState<Mission[]>([]);
-  const [activeTab, setActiveTab] = useState<"users" | "activities">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "activities" | "ats">(
+    profile.role === "rh" ? "ats" : "users"
+  );
   const [allMissions, setAllMissions] = useState<Mission[]>([]);
   const [lastMissionDoc, setLastMissionDoc] = useState<any>(null);
   const [hasMoreMissions, setHasMoreMissions] = useState(true);
@@ -585,26 +589,40 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         </div>
       </header>
 
-      {/* Tab Navigation */}
       <div className="flex items-center gap-2 p-1 bg-white/5 rounded-2xl w-fit border border-white/5">
-        <button
-          onClick={() => setActiveTab("users")}
-          className={cn(
-            "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
-            activeTab === "users" ? "bg-neon-blue text-black neon-glow-blue" : "text-gray-500 hover:text-white"
-          )}
-        >
-          <Users className="w-4 h-4" /> Gestão de Usuários
-        </button>
-        <button
-          onClick={() => setActiveTab("activities")}
-          className={cn(
-            "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
-            activeTab === "activities" ? "bg-mult-orange text-white neon-glow-orange" : "text-gray-500 hover:text-white"
-          )}
-        >
-          <FileText className="w-4 h-4" /> Atividades dos Alunos
-        </button>
+        {profile.role !== "rh" && (
+          <>
+            <button
+              onClick={() => setActiveTab("users")}
+              className={cn(
+                "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                activeTab === "users" ? "bg-neon-blue text-black neon-glow-blue" : "text-gray-500 hover:text-white"
+              )}
+            >
+              <Users className="w-4 h-4" /> Gestão de Usuários
+            </button>
+            <button
+              onClick={() => setActiveTab("activities")}
+              className={cn(
+                "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                activeTab === "activities" ? "bg-mult-orange text-white neon-glow-orange" : "text-gray-500 hover:text-white"
+              )}
+            >
+              <FileText className="w-4 h-4" /> Atividades dos Alunos
+            </button>
+          </>
+        )}
+        {["master", "coordenador", "rh"].includes(profile.role) && (
+          <button
+            onClick={() => setActiveTab("ats")}
+            className={cn(
+              "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
+              activeTab === "ats" ? "bg-green-500 text-black neon-glow-green" : "text-gray-500 hover:text-white"
+            )}
+          >
+            <Briefcase className="w-4 h-4" /> Agência (ATS)
+          </button>
+        )}
       </div>
 
       {/* Stats & Controls */}
@@ -780,7 +798,9 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       </div>
 
       {/* Tab Content */}
-      {activeTab === "users" ? (
+      {activeTab === "ats" ? (
+        <AtsDashboard profile={profile} />
+      ) : activeTab === "users" ? (
         <div className="glass-card overflow-hidden">
         <div className="p-6 border-b border-white/5 bg-white/5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">

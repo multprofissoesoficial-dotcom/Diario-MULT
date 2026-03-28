@@ -8,13 +8,46 @@
         "uid": { "type": "string" },
         "displayName": { "type": "string" },
         "email": { "type": "string", "format": "email" },
-        "role": { "type": "string", "enum": ["master", "coordenador", "professor", "aluno"] },
+        "role": { "type": "string", "enum": ["master", "coordenador", "professor", "aluno", "rh"] },
         "franquiaId": { "type": "string" },
+        "turma": { "type": "string" },
         "xp": { "type": "integer" },
         "unlockedBadges": { "type": "array", "items": { "type": "string" } },
+        "resumeUrl": { "type": "string", "format": "uri" },
+        "skills": { "type": "array", "items": { "type": "string" } },
+        "phone": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "email", "role"]
+    },
+    "JobPosting": {
+      "title": "JobPosting",
+      "description": "Job posting for the ATS module.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "company": { "type": "string" },
+        "description": { "type": "string" },
+        "requiredSkills": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["aberta", "fechada"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdByUid": { "type": "string" }
+      },
+      "required": ["title", "company", "requiredSkills", "status"]
+    },
+    "Application": {
+      "title": "Application",
+      "description": "Job application from a student.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "jobId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "matchScore": { "type": "integer" },
+        "appliedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["jobId", "studentId", "matchScore", "appliedAt"]
     },
     "Franquia": {
       "title": "Franquia",
@@ -61,6 +94,14 @@
     "/missions/{missionId}": {
       "schema": "Mission",
       "description": "Collection of student missions."
+    },
+    "/job_postings/{jobId}": {
+      "schema": "JobPosting",
+      "description": "Collection of job postings for ATS."
+    },
+    "/applications/{applicationId}": {
+      "schema": "Application",
+      "description": "Collection of job applications."
     }
   }
 }

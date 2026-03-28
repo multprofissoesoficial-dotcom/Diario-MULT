@@ -26,4 +26,8 @@
   .neon-glow-orange {
     @apply shadow-[0_0_15px_rgba(255,107,0,0.4)];
   }
+
+  .neon-glow-green {
+    @apply shadow-[0_0_15px_rgba(34,197,94,0.4)];
+  }
 }

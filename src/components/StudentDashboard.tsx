@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { collection, addDoc, query, where, orderBy, onSnapshot, doc, updateDoc, arrayUnion } from "firebase/firestore";
-import { db } from "../firebase";
-import { UserProfile, Mission, Badge } from "../types";
+import { collection, addDoc, query, where, orderBy, onSnapshot, doc, updateDoc, arrayUnion, serverTimestamp, getDocs } from "firebase/firestore";
+import { db, storage } from "../firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { UserProfile, Mission, Badge, SkillTag, JobPosting, Application } from "../types";
 import { RANKS, BADGES } from "../constants";
 import { getAbsoluteLessonId, getRelativeLesson, getLessonsForModule } from "../utils/lessonMapper";
 import { motion, AnimatePresence } from "motion/react";
@@ -52,7 +53,16 @@ function XPCounter({ value }: { value: number }) {
   return <span>{displayValue}</span>;
 }
 
+const SKILLS: SkillTag[] = [
+  'Boa Comunicação', 'Trabalho em Equipe', 'Proatividade', 'Organização', 
+  'Perfil Analítico', 'Adaptabilidade', 'Inteligência Emocional', 'Foco em Resultados', 
+  'Informática Básica', 'Pacote Office', 'Atendimento ao Cliente', 'Vendas e Negociação', 
+  'Inglês Básico', 'Rotinas Administrativas', 'Primeiro Emprego', 
+  'Disponibilidade Tarde/Noite', 'Disponibilidade Manhã/Tarde'
+];
+
 export default function StudentDashboard({ profile }: { profile: UserProfile }) {
+  const [activeTab, setActiveTab] = useState<"missions" | "ats">("missions");
   const [module, setModule] = useState("Windows");
   const [classNum, setClassNum] = useState(1);
   const [content, setContent] = useState("");
@@ -61,6 +71,33 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
   const [aiFeedback, setAiFeedback] = useState<string | null>(null);
   const [newBadge, setNewBadge] = useState<Badge | null>(null);
   const [selectedMission, setSelectedMission] = useState<Mission | null>(null);
+
+  // ATS State
+  const [selectedSkills, setSelectedSkills] = useState<SkillTag[]>(profile.skills || []);
+  const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [uploadingProfile, setUploadingProfile] = useState(false);
+  const [jobs, setJobs] = useState<JobPosting[]>([]);
+  const [userApplications, setUserApplications] = useState<Application[]>([]);
+  const [applyingJobId, setApplyingJobId] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Fetch Jobs
+    const jobsQuery = query(collection(db, "job_postings"), where("status", "==", "aberta"));
+    const unsubJobs = onSnapshot(jobsQuery, (snap) => {
+      setJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as JobPosting)));
+    });
+
+    // Fetch User Applications
+    const appsQuery = query(collection(db, "applications"), where("studentId", "==", profile.uid));
+    const unsubApps = onSnapshot(appsQuery, (snap) => {
+      setUserApplications(snap.docs.map(d => ({ id: d.id, ...d.data() } as Application)));
+    });
+
+    return () => {
+      unsubJobs();
+      unsubApps();
+    };
+  }, [profile.uid]);
 
   useEffect(() => {
     const q = query(
@@ -143,6 +180,70 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     }, 2000);
   };
 
+  const handleProfileUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUploadingProfile(true);
+    try {
+      let resumeUrl = profile.resumeUrl || "";
+
+      if (resumeFile) {
+        if (resumeFile.size > 5 * 1024 * 1024) {
+          alert("O currículo deve ter no máximo 5MB.");
+          setUploadingProfile(false);
+          return;
+        }
+        const resumeRef = ref(storage, `resumes/${profile.uid}/curriculo.pdf`);
+        await uploadBytes(resumeRef, resumeFile);
+        resumeUrl = await getDownloadURL(resumeRef);
+      }
+
+      const userRef = doc(db, "users", profile.uid);
+      await updateDoc(userRef, {
+        skills: selectedSkills,
+        resumeUrl: resumeUrl
+      });
+
+      alert("Perfil profissional atualizado com sucesso!");
+    } catch (error) {
+      console.error("Erro ao atualizar perfil:", error);
+      alert("Erro ao atualizar perfil profissional.");
+    } finally {
+      setUploadingProfile(false);
+    }
+  };
+
+  const handleApply = async (job: JobPosting) => {
+    if (!profile.skills || profile.skills.length === 0) {
+      alert("Por favor, preencha suas habilidades no perfil profissional antes de se candidatar.");
+      return;
+    }
+
+    setApplyingJobId(job.id);
+    try {
+      // Motor de Match Matemático
+      const studentSkills = selectedSkills;
+      const requiredSkills = job.requiredSkills;
+      
+      const commonSkills = studentSkills.filter(skill => requiredSkills.includes(skill));
+      const score = Math.round((commonSkills.length / requiredSkills.length) * 100);
+
+      await addDoc(collection(db, "applications"), {
+        jobId: job.id,
+        studentId: profile.uid,
+        matchScore: score,
+        appliedAt: serverTimestamp()
+      });
+
+      alert(`Candidatura enviada! Seu Match Score é ${score}%.`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, "applications");
+    } finally {
+      setApplyingJobId(null);
+    }
+  };
+
+  const hasApplied = (jobId: string) => userApplications.some(app => app.jobId === jobId);
+
   const currentRank = RANKS.reduce((prev, curr) => (profile.xp >= curr.minXP ? curr : prev), RANKS[0]);
   const nextRank = RANKS.find(r => r.minXP > profile.xp) || null;
   const progress = nextRank 
@@ -205,15 +306,38 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
             <p className="text-[9px] sm:text-[10px] font-black text-gray-500 uppercase tracking-widest mt-1">Cockpit v2.0 • Piloto {profile.displayName.split(' ')[0]}</p>
           </div>
         </div>
-        <button 
-          onClick={() => auth.signOut()}
-          className="absolute top-4 right-4 sm:relative sm:top-0 sm:right-0 p-2 rounded-full hover:bg-white/10 transition-colors text-gray-400"
-        >
-          <LogOut className="w-5 h-5" />
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 mr-4">
+            <button 
+              onClick={() => setActiveTab("missions")}
+              className={cn(
+                "px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all",
+                activeTab === "missions" ? "bg-mult-orange text-white neon-glow-orange" : "text-gray-500 hover:text-gray-300"
+              )}
+            >
+              Missões
+            </button>
+            <button 
+              onClick={() => setActiveTab("ats")}
+              className={cn(
+                "px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all",
+                activeTab === "ats" ? "bg-neon-blue text-white neon-glow-blue" : "text-gray-500 hover:text-gray-300"
+              )}
+            >
+              Agência
+            </button>
+          </div>
+          <button 
+            onClick={() => auth.signOut()}
+            className="p-2 rounded-full hover:bg-white/10 transition-colors text-gray-400"
+          >
+            <LogOut className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      {activeTab === "missions" ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left Column: Player Card & Badges */}
         <div className="space-y-8">
           {/* Player Card */}
@@ -406,6 +530,153 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
           </div>
         </div>
       </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* ATS Profile Section */}
+          <div className="space-y-8">
+            <motion.div 
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="glass-card p-6"
+            >
+              <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-6 flex items-center gap-2">
+                <UserIcon className="w-4 h-4 text-neon-blue" /> Meu Perfil Profissional
+              </h3>
+              
+              <form onSubmit={handleProfileUpdate} className="space-y-6">
+                <div className="space-y-4">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Minhas Habilidades</label>
+                  <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto custom-scrollbar pr-2">
+                    {SKILLS.map(skill => (
+                      <label key={skill} className="flex items-center gap-3 p-2 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
+                        <input 
+                          type="checkbox"
+                          checked={selectedSkills.includes(skill)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedSkills([...selectedSkills, skill]);
+                            } else {
+                              setSelectedSkills(selectedSkills.filter(s => s !== skill));
+                            }
+                          }}
+                          className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-neon-blue focus:ring-neon-blue"
+                        />
+                        <span className="text-xs text-gray-300">{skill}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Currículo (PDF)</label>
+                  <div className="relative">
+                    <input 
+                      type="file"
+                      accept=".pdf"
+                      onChange={(e) => setResumeFile(e.target.files?.[0] || null)}
+                      className="hidden"
+                      id="resume-upload"
+                    />
+                    <label 
+                      htmlFor="resume-upload"
+                      className="flex items-center justify-center gap-2 w-full p-4 rounded-xl border-2 border-dashed border-white/10 hover:border-neon-blue/50 hover:bg-neon-blue/5 transition-all cursor-pointer group"
+                    >
+                      <FileText className="w-5 h-5 text-gray-500 group-hover:text-neon-blue" />
+                      <span className="text-xs font-bold text-gray-400 group-hover:text-gray-200">
+                        {resumeFile ? resumeFile.name : profile.resumeUrl ? "Alterar Currículo" : "Upload Currículo (PDF)"}
+                      </span>
+                    </label>
+                  </div>
+                  {profile.resumeUrl && (
+                    <a 
+                      href={profile.resumeUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-neon-blue hover:underline block text-center mt-2"
+                    >
+                      Ver currículo atual
+                    </a>
+                  )}
+                </div>
+
+                <button 
+                  type="submit"
+                  disabled={uploadingProfile}
+                  className="w-full bg-neon-blue text-white font-black py-3 rounded-xl transition-all neon-glow-blue uppercase tracking-widest text-xs disabled:opacity-50"
+                >
+                  {uploadingProfile ? "SALVANDO..." : "ATUALIZAR PERFIL"}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+
+          {/* Job Board Section */}
+          <div className="lg:col-span-2 space-y-6">
+            <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 flex items-center gap-2">
+              <Briefcase className="w-4 h-4 text-mult-orange" /> Mural de Vagas
+            </h3>
+
+            <div className="grid grid-cols-1 gap-4">
+              {jobs.map(job => (
+                <motion.div 
+                  key={job.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="glass-card p-6 relative group border-white/10 hover:border-mult-orange/30 transition-all"
+                >
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <h4 className="text-lg font-black tracking-tighter text-white uppercase">{job.title}</h4>
+                      <p className="text-xs font-bold text-mult-orange uppercase tracking-widest">{job.company}</p>
+                    </div>
+                    {hasApplied(job.id) && (
+                      <span className="bg-green-500/10 text-green-500 text-[10px] font-black px-2 py-1 rounded-full border border-green-500/20 uppercase tracking-widest">
+                        Candidatado
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-sm text-gray-400 mb-6 line-clamp-3 italic">"{job.description}"</p>
+
+                  <div className="flex flex-wrap gap-2 mb-6">
+                    {job.requiredSkills.map(skill => (
+                      <span 
+                        key={skill}
+                        className={cn(
+                          "text-[9px] font-black px-2 py-1 rounded-md uppercase tracking-widest border",
+                          selectedSkills.includes(skill) 
+                            ? "bg-neon-blue/10 text-neon-blue border-neon-blue/20" 
+                            : "bg-white/5 text-gray-500 border-white/10"
+                        )}
+                      >
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+
+                  <button 
+                    onClick={() => handleApply(job)}
+                    disabled={hasApplied(job.id) || applyingJobId === job.id}
+                    className={cn(
+                      "w-full py-3 rounded-xl font-black uppercase tracking-widest text-xs transition-all",
+                      hasApplied(job.id)
+                        ? "bg-white/5 text-gray-600 cursor-not-allowed"
+                        : "bg-gradient-to-r from-mult-orange to-orange-600 text-white neon-glow-orange hover:scale-[1.02] active:scale-95"
+                    )}
+                  >
+                    {applyingJobId === job.id ? "PROCESSANDO..." : hasApplied(job.id) ? "CANDIDATURA ENVIADA" : "CANDIDATAR-ME"}
+                  </button>
+                </motion.div>
+              ))}
+              {jobs.length === 0 && (
+                <div className="glass-card p-12 text-center">
+                  <p className="text-gray-500 italic">Nenhuma vaga disponível no momento. Volte em breve!</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {/* Mission Detail Modal */}
       <AnimatePresence>
         {selectedMission && (

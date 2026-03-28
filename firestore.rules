@@ -17,7 +17,11 @@ service cloud.firestore {
     }
 
     function isPCM() {
-      return isAuthenticated() && getUserData().role in ['master', 'coordenador', 'professor'];
+      return isAuthenticated() && getUserData().role in ['master', 'coordenador', 'professor', 'rh'];
+    }
+
+    function isATSAdmin() {
+      return isAuthenticated() && getUserData().role in ['master', 'coordenador', 'rh'];
     }
 
     function isOwner(userId) {
@@ -36,7 +40,7 @@ service cloud.firestore {
              data.uid is string && data.uid.size() > 0 && data.uid.size() < 128 &&
              data.displayName is string && data.displayName.size() > 0 && data.displayName.size() < 100 &&
              data.email is string && data.email.size() > 0 && data.email.size() < 100 &&
-             data.role in ['master', 'coordenador', 'professor', 'aluno'] &&
+             data.role in ['master', 'coordenador', 'professor', 'aluno', 'rh'] &&
              data.xp is number &&
              data.unlockedBadges is list && data.unlockedBadges.size() < 100 &&
              data.createdAt is string;
@@ -65,28 +69,41 @@ service cloud.firestore {
       // Students can only GET their own document. They CANNOT LIST.
       allow get: if isOwner(userId);
       
-      // PCM can list and read any user in their franchise (or all if master)
+      // PCM can list and read any user in their franchise (or all if master/rh)
       allow list: if isPCM();
       allow get: if isPCM() && (
-        getUserData().role == 'master' || 
+        getUserData().role in ['master', 'rh'] || 
         getUserData().franquiaId == resource.data.franquiaId
       );
 
-      // Create: Only master or coordinator (within franchise)
-      allow create: if (isMaster() || (
+      // Create: Only master, coordinator (within franchise), or RH
+      allow create: if (isATSAdmin() || (
         isAuthenticated() && getUserData().role == 'coordenador' && 
         request.resource.data.franquiaId == getUserData().franquiaId &&
         request.resource.data.role in ['professor', 'aluno']
       )) && isValidUser(request.resource.data);
 
-      // Update: Owner (limited fields), Master, or PCM (within franchise)
+      // Update: Owner (limited fields), Master, RH, or PCM (within franchise)
       allow update: if (
         (isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.franquiaId == resource.data.franquiaId) || 
-        isMaster() || 
-        (isPCM() && resource.data.franquiaId == getUserData().franquiaId && (request.resource.data.role == resource.data.role || isMaster()))
+        isATSAdmin() || 
+        (isPCM() && resource.data.franquiaId == getUserData().franquiaId && (request.resource.data.role == resource.data.role || isATSAdmin()))
       ) && isValidUser(request.resource.data);
 
       allow delete: if isMaster();
+    }
+
+    // Vagas (Job Postings)
+    match /job_postings/{jobId} {
+      allow read: if isAuthenticated();
+      allow write: if isATSAdmin();
+    }
+
+    // Candidaturas (Applications)
+    match /applications/{applicationId} {
+      allow read: if isATSAdmin() || (isAuthenticated() && resource.data.studentId == request.auth.uid);
+      allow create: if isAuthenticated() && request.resource.data.studentId == request.auth.uid;
+      allow update, delete: if isATSAdmin();
     }
 
     // Missões (Diários)
