@@ -81,8 +81,12 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
   const [applyingJobId, setApplyingJobId] = useState<string | null>(null);
 
   useEffect(() => {
-    // Fetch Jobs
-    const jobsQuery = query(collection(db, "job_postings"), where("status", "==", "aberta"));
+    // Fetch Jobs - Multitenancy: Filter by franquiaId
+    const jobsQuery = query(
+      collection(db, "job_postings"), 
+      where("status", "==", "aberta"),
+      where("franquiaId", "==", profile.franquiaId)
+    );
     const unsubJobs = onSnapshot(jobsQuery, (snap) => {
       setJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as JobPosting)));
     });
@@ -244,6 +248,24 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
   };
 
   const hasApplied = (jobId: string) => userApplications.some(app => app.jobId === jobId);
+
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const [loadingTerms, setLoadingTerms] = useState(false);
+
+  const handleAcceptTerms = async () => {
+    if (!acceptTerms) return;
+    setLoadingTerms(true);
+    try {
+      await updateDoc(doc(db, "users", profile.uid), {
+        atsTermsAccepted: true,
+        atsTermsAcceptedAt: serverTimestamp()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, "users");
+    } finally {
+      setLoadingTerms(false);
+    }
+  };
 
   const currentRank = RANKS.reduce((prev, curr) => (profile.xp >= curr.minXP ? curr : prev), RANKS[0]);
   const nextRank = RANKS.find(r => r.minXP > profile.xp) || null;
@@ -532,151 +554,208 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
         </div>
       </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* ATS Profile Section */}
-          <div className="space-y-8">
+        <AnimatePresence mode="wait">
+          {!profile.atsTermsAccepted ? (
             <motion.div 
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="glass-card p-6"
+              key="terms"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="max-w-2xl mx-auto glass-card p-8 space-y-6 border-mult-orange/30"
             >
-              <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-6 flex items-center gap-2">
-                <UserIcon className="w-4 h-4 text-neon-blue" /> Meu Perfil Profissional
-              </h3>
-              
-              <form onSubmit={handleProfileUpdate} className="space-y-6">
-                <div className="space-y-4">
-                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Minhas Habilidades</label>
-                  <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto custom-scrollbar pr-2">
-                    {SKILLS.map(skill => (
-                      <label key={skill} className="flex items-center gap-3 p-2 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
-                        <input 
-                          type="checkbox"
-                          checked={selectedSkills.includes(skill)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedSkills([...selectedSkills, skill]);
-                            } else {
-                              setSelectedSkills(selectedSkills.filter(s => s !== skill));
-                            }
-                          }}
-                          className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-neon-blue focus:ring-neon-blue"
-                        />
-                        <span className="text-xs text-gray-300">{skill}</span>
-                      </label>
-                    ))}
-                  </div>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 rounded-full bg-mult-orange/20 flex items-center justify-center text-mult-orange neon-glow-orange border border-mult-orange/30">
+                  <FileText className="w-6 h-6" />
                 </div>
+                <h2 className="text-xl font-black tracking-tighter uppercase">Termos e Normas de Encaminhamento</h2>
+              </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Currículo (PDF)</label>
-                  <div className="relative">
+              <div className="bg-black/40 border border-white/10 rounded-xl p-6 h-64 overflow-y-auto custom-scrollbar text-sm text-gray-400 leading-relaxed space-y-4">
+                <p className="font-bold text-white">DECLARAÇÃO DE CONHECIMENTO DAS NORMAS DE ENCAMINHAMENTO.</p>
+                <p>Declaro para devidos fins de direito ter plena ciência das leis referentes aos serviços de Encaminhamentos exercidos pela MULT Profissões:</p>
+                <p>1º O(a) aluno(a) que for encaminhado e faltar sem justificativa prévia perderá o direito de ser encaminhado novamente.</p>
+                <p>2º O(a) aluno(a) que participar de todo o processo seletivo, concordar com as exigências e no momento da contratação desistir da vaga, perderá o direito de ser encaminhado novamente.</p>
+                <p>3º É direito do aluno ser encaminhado, mas a Agência não garante a contratação.</p>
+                <p>4º O aluno pode se negar a concorrer à vaga ao ouvir as exigências.</p>
+                <p>5º Não é de responsabilidade da MULT Profissões os vínculos empregatícios (assinatura de carteira, etc) entre alunos e empresas parceiras.</p>
+                <p>6º Após contratação, o aluno deve informar à Agência para atualização de status.</p>
+              </div>
+
+              <div className="space-y-4">
+                <label className="flex items-center gap-3 cursor-pointer group">
+                  <div className="relative flex items-center">
                     <input 
-                      type="file"
-                      accept=".pdf"
-                      onChange={(e) => setResumeFile(e.target.files?.[0] || null)}
-                      className="hidden"
-                      id="resume-upload"
+                      type="checkbox" 
+                      checked={acceptTerms}
+                      onChange={(e) => setAcceptTerms(e.target.checked)}
+                      className="w-5 h-5 rounded border-gray-700 bg-gray-800 text-mult-orange focus:ring-mult-orange transition-all"
                     />
-                    <label 
-                      htmlFor="resume-upload"
-                      className="flex items-center justify-center gap-2 w-full p-4 rounded-xl border-2 border-dashed border-white/10 hover:border-neon-blue/50 hover:bg-neon-blue/5 transition-all cursor-pointer group"
-                    >
-                      <FileText className="w-5 h-5 text-gray-500 group-hover:text-neon-blue" />
-                      <span className="text-xs font-bold text-gray-400 group-hover:text-gray-200">
-                        {resumeFile ? resumeFile.name : profile.resumeUrl ? "Alterar Currículo" : "Upload Currículo (PDF)"}
-                      </span>
-                    </label>
                   </div>
-                  {profile.resumeUrl && (
-                    <a 
-                      href={profile.resumeUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-[10px] text-neon-blue hover:underline block text-center mt-2"
-                    >
-                      Ver currículo atual
-                    </a>
-                  )}
-                </div>
+                  <span className="text-xs font-bold text-gray-400 group-hover:text-gray-200 transition-colors uppercase tracking-widest">Li e concordo com os termos</span>
+                </label>
 
                 <button 
-                  type="submit"
-                  disabled={uploadingProfile}
-                  className="w-full bg-neon-blue text-white font-black py-3 rounded-xl transition-all neon-glow-blue uppercase tracking-widest text-xs disabled:opacity-50"
+                  onClick={handleAcceptTerms}
+                  disabled={!acceptTerms || loadingTerms}
+                  className="w-full bg-mult-orange text-white font-black py-4 rounded-xl transition-all neon-glow-orange uppercase tracking-widest text-xs disabled:opacity-30 disabled:grayscale"
                 >
-                  {uploadingProfile ? "SALVANDO..." : "ATUALIZAR PERFIL"}
+                  {loadingTerms ? "PROCESSANDO..." : "ACEITAR TERMOS E ACESSAR AGÊNCIA"}
                 </button>
-              </form>
+              </div>
             </motion.div>
-          </div>
-
-          {/* Job Board Section */}
-          <div className="lg:col-span-2 space-y-6">
-            <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 flex items-center gap-2">
-              <Briefcase className="w-4 h-4 text-mult-orange" /> Mural de Vagas
-            </h3>
-
-            <div className="grid grid-cols-1 gap-4">
-              {jobs.map(job => (
+          ) : (
+            <motion.div 
+              key="ats-content"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="grid grid-cols-1 lg:grid-cols-3 gap-8"
+            >
+              {/* ATS Profile Section */}
+              <div className="space-y-8">
                 <motion.div 
-                  key={job.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="glass-card p-6 relative group border-white/10 hover:border-mult-orange/30 transition-all"
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="glass-card p-6"
                 >
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h4 className="text-lg font-black tracking-tighter text-white uppercase">{job.title}</h4>
-                      <p className="text-xs font-bold text-mult-orange uppercase tracking-widest">{job.companyName || "Empresa"}</p>
+                  <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-6 flex items-center gap-2">
+                    <UserIcon className="w-4 h-4 text-neon-blue" /> Meu Perfil Profissional
+                  </h3>
+                  
+                  <form onSubmit={handleProfileUpdate} className="space-y-6">
+                    <div className="space-y-4">
+                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Minhas Habilidades</label>
+                      <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto custom-scrollbar pr-2">
+                        {SKILLS.map(skill => (
+                          <label key={skill} className="flex items-center gap-3 p-2 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
+                            <input 
+                              type="checkbox"
+                              checked={selectedSkills.includes(skill)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedSkills([...selectedSkills, skill]);
+                                } else {
+                                  setSelectedSkills(selectedSkills.filter(s => s !== skill));
+                                }
+                              }}
+                              className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-neon-blue focus:ring-neon-blue"
+                            />
+                            <span className="text-xs text-gray-300">{skill}</span>
+                          </label>
+                        ))}
+                      </div>
                     </div>
-                    {hasApplied(job.id) && (
-                      <span className="bg-green-500/10 text-green-500 text-[10px] font-black px-2 py-1 rounded-full border border-green-500/20 uppercase tracking-widest">
-                        Candidatado
-                      </span>
-                    )}
-                  </div>
 
-                  <p className="text-sm text-gray-400 mb-6 line-clamp-3 italic">"{job.description}"</p>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Currículo (PDF)</label>
+                      <div className="relative">
+                        <input 
+                          type="file"
+                          accept=".pdf"
+                          onChange={(e) => setResumeFile(e.target.files?.[0] || null)}
+                          className="hidden"
+                          id="resume-upload"
+                        />
+                        <label 
+                          htmlFor="resume-upload"
+                          className="flex items-center justify-center gap-2 w-full p-4 rounded-xl border-2 border-dashed border-white/10 hover:border-neon-blue/50 hover:bg-neon-blue/5 transition-all cursor-pointer group"
+                        >
+                          <FileText className="w-5 h-5 text-gray-500 group-hover:text-neon-blue" />
+                          <span className="text-xs font-bold text-gray-400 group-hover:text-gray-200">
+                            {resumeFile ? resumeFile.name : profile.resumeUrl ? "Alterar Currículo" : "Upload Currículo (PDF)"}
+                          </span>
+                        </label>
+                      </div>
+                      {profile.resumeUrl && (
+                        <a 
+                          href={profile.resumeUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-[10px] text-neon-blue hover:underline block text-center mt-2"
+                        >
+                          Ver currículo atual
+                        </a>
+                      )}
+                    </div>
 
-                  <div className="flex flex-wrap gap-2 mb-6">
-                    {job.requiredSkills.map(skill => (
-                      <span 
-                        key={skill}
+                    <button 
+                      type="submit"
+                      disabled={uploadingProfile}
+                      className="w-full bg-neon-blue text-white font-black py-3 rounded-xl transition-all neon-glow-blue uppercase tracking-widest text-xs disabled:opacity-50"
+                    >
+                      {uploadingProfile ? "SALVANDO..." : "ATUALIZAR PERFIL"}
+                    </button>
+                  </form>
+                </motion.div>
+              </div>
+
+              {/* Job Board Section */}
+              <div className="lg:col-span-2 space-y-6">
+                <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 flex items-center gap-2">
+                  <Briefcase className="w-4 h-4 text-mult-orange" /> Mural de Vagas
+                </h3>
+
+                <div className="grid grid-cols-1 gap-4">
+                  {jobs.map(job => (
+                    <motion.div 
+                      key={job.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="glass-card p-6 relative group border-white/10 hover:border-mult-orange/30 transition-all"
+                    >
+                      <div className="flex justify-between items-start mb-4">
+                        <div>
+                          <h4 className="text-lg font-black tracking-tighter text-white uppercase">{job.title}</h4>
+                          <p className="text-xs font-bold text-mult-orange uppercase tracking-widest">{job.companyName || "Empresa"}</p>
+                        </div>
+                        {hasApplied(job.id) && (
+                          <span className="bg-green-500/10 text-green-500 text-[10px] font-black px-2 py-1 rounded-full border border-green-500/20 uppercase tracking-widest">
+                            Candidatado
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-sm text-gray-400 mb-6 line-clamp-3 italic">"{job.description}"</p>
+
+                      <div className="flex flex-wrap gap-2 mb-6">
+                        {job.requiredSkills.map(skill => (
+                          <span 
+                            key={skill}
+                            className={cn(
+                              "text-[9px] font-black px-2 py-1 rounded-md uppercase tracking-widest border",
+                              selectedSkills.includes(skill) 
+                                ? "bg-neon-blue/10 text-neon-blue border-neon-blue/20" 
+                                : "bg-white/5 text-gray-500 border-white/10"
+                            )}
+                          >
+                            {skill}
+                          </span>
+                        ))}
+                      </div>
+
+                      <button 
+                        onClick={() => handleApply(job)}
+                        disabled={hasApplied(job.id) || applyingJobId === job.id}
                         className={cn(
-                          "text-[9px] font-black px-2 py-1 rounded-md uppercase tracking-widest border",
-                          selectedSkills.includes(skill) 
-                            ? "bg-neon-blue/10 text-neon-blue border-neon-blue/20" 
-                            : "bg-white/5 text-gray-500 border-white/10"
+                          "w-full py-3 rounded-xl font-black uppercase tracking-widest text-xs transition-all",
+                          hasApplied(job.id)
+                            ? "bg-white/5 text-gray-600 cursor-not-allowed"
+                            : "bg-gradient-to-r from-mult-orange to-orange-600 text-white neon-glow-orange hover:scale-[1.02] active:scale-95"
                         )}
                       >
-                        {skill}
-                      </span>
-                    ))}
-                  </div>
-
-                  <button 
-                    onClick={() => handleApply(job)}
-                    disabled={hasApplied(job.id) || applyingJobId === job.id}
-                    className={cn(
-                      "w-full py-3 rounded-xl font-black uppercase tracking-widest text-xs transition-all",
-                      hasApplied(job.id)
-                        ? "bg-white/5 text-gray-600 cursor-not-allowed"
-                        : "bg-gradient-to-r from-mult-orange to-orange-600 text-white neon-glow-orange hover:scale-[1.02] active:scale-95"
-                    )}
-                  >
-                    {applyingJobId === job.id ? "PROCESSANDO..." : hasApplied(job.id) ? "CANDIDATURA ENVIADA" : "CANDIDATAR-ME"}
-                  </button>
-                </motion.div>
-              ))}
-              {jobs.length === 0 && (
-                <div className="glass-card p-12 text-center">
-                  <p className="text-gray-500 italic">Nenhuma vaga disponível no momento. Volte em breve!</p>
+                        {applyingJobId === job.id ? "PROCESSANDO..." : hasApplied(job.id) ? "CANDIDATURA ENVIADA" : "CANDIDATAR-ME"}
+                      </button>
+                    </motion.div>
+                  ))}
+                  {jobs.length === 0 && (
+                    <div className="glass-card p-12 text-center">
+                      <p className="text-gray-500 italic">Nenhuma vaga disponível no momento. Volte em breve!</p>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
-        </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       )}
       {/* Mission Detail Modal */}
       <AnimatePresence>

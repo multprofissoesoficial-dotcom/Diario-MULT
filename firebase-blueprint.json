@@ -16,6 +16,8 @@
         "resumeUrl": { "type": "string", "format": "uri" },
         "skills": { "type": "array", "items": { "type": "string" } },
         "phone": { "type": "string" },
+        "atsTermsAccepted": { "type": "boolean" },
+        "atsTermsAcceptedAt": { "type": "string", "format": "date-time" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "email", "role"]
@@ -32,10 +34,11 @@
         "description": { "type": "string" },
         "requiredSkills": { "type": "array", "items": { "type": "string" } },
         "status": { "type": "string", "enum": ["aberta", "fechada"] },
+        "franquiaId": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "createdByUid": { "type": "string" }
       },
-      "required": ["title", "companyId", "requiredSkills", "status"]
+      "required": ["title", "companyId", "requiredSkills", "status", "franquiaId"]
     },
     "Application": {
       "title": "Application",
@@ -47,6 +50,19 @@
         "studentId": { "type": "string" },
         "matchScore": { "type": "integer" },
         "status": { "type": "string", "enum": ["pendente", "encaminhado", "contratado", "rejeitado"] },
+        "hrNotes": { "type": "string" },
+        "hrRating": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "statusHistory": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "status": { "type": "string" },
+              "date": { "type": "string", "format": "date-time" },
+              "updatedByRole": { "type": "string" }
+            }
+          }
+        },
         "appliedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["jobId", "studentId", "matchScore", "status", "appliedAt"]
@@ -60,9 +76,10 @@
         "name": { "type": "string" },
         "contactPerson": { "type": "string" },
         "phone": { "type": "string" },
+        "franquiaId": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "name", "contactPerson", "phone", "createdAt"]
+      "required": ["id", "name", "contactPerson", "phone", "createdAt", "franquiaId"]
     },
     "Franquia": {
       "title": "Franquia",

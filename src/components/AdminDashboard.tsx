@@ -817,6 +817,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                 <option value="aluno">Alunos</option>
                 <option value="professor">Professores</option>
                 <option value="coordenador">Coordenadores</option>
+                <option value="rh">Estagiária de RH</option>
               </select>
               {roleFilter === "aluno" && (
                 <select 

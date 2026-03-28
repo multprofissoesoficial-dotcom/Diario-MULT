@@ -39,6 +39,8 @@ export interface UserProfile {
   resumeUrl?: string;
   skills?: SkillTag[];
   phone?: string;
+  atsTermsAccepted?: boolean;
+  atsTermsAcceptedAt?: any;
   createdAt: string;
 }
 
@@ -47,6 +49,7 @@ export interface Company {
   name: string;
   contactPerson: string;
   phone: string;
+  franquiaId: string;
   createdAt: string;
 }
 
@@ -58,11 +61,18 @@ export interface JobPosting {
   description: string;
   requiredSkills: SkillTag[];
   status: 'aberta' | 'fechada';
+  franquiaId: string;
   createdAt: string;
   createdByUid: string;
 }
 
 export type ApplicationStatus = 'pendente' | 'encaminhado' | 'contratado' | 'rejeitado';
+
+export interface StatusHistoryEntry {
+  status: ApplicationStatus;
+  date: any;
+  updatedByRole: string;
+}
 
 export interface Application {
   id: string;
@@ -70,6 +80,9 @@ export interface Application {
   studentId: string;
   matchScore: number;
   status: ApplicationStatus;
+  hrNotes?: string;
+  hrRating?: number;
+  statusHistory?: StatusHistoryEntry[];
   appliedAt: string;
 }
 

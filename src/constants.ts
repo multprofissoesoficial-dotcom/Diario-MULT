@@ -52,9 +52,10 @@ export const BADGES: Badge[] = [
 export const XP_PER_MISSION = 50;
 export const XP_BONUS = 100;
 
-export const ROLES_LABELS = {
+export const ROLES_LABELS: Record<string, string> = {
   master: "Master",
   coordenador: "Coordenador",
   professor: "Professor",
-  aluno: "Aluno"
+  aluno: "Aluno",
+  rh: "Estagiária de RH"
 };
