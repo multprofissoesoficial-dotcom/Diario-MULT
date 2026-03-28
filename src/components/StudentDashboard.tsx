@@ -231,6 +231,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
         jobId: job.id,
         studentId: profile.uid,
         matchScore: score,
+        status: 'pendente',
         appliedAt: serverTimestamp()
       });
 
@@ -627,7 +628,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
                   <div className="flex justify-between items-start mb-4">
                     <div>
                       <h4 className="text-lg font-black tracking-tighter text-white uppercase">{job.title}</h4>
-                      <p className="text-xs font-bold text-mult-orange uppercase tracking-widest">{job.company}</p>
+                      <p className="text-xs font-bold text-mult-orange uppercase tracking-widest">{job.companyName || "Empresa"}</p>
                     </div>
                     {hasApplied(job.id) && (
                       <span className="bg-green-500/10 text-green-500 text-[10px] font-black px-2 py-1 rounded-full border border-green-500/20 uppercase tracking-widest">

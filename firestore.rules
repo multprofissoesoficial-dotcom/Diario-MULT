@@ -99,6 +99,12 @@ service cloud.firestore {
       allow write: if isATSAdmin();
     }
 
+    // Empresas (Companies)
+    match /companies/{companyId} {
+      allow read: if isAuthenticated();
+      allow write: if isATSAdmin();
+    }
+
     // Candidaturas (Applications)
     match /applications/{applicationId} {
       allow read: if isATSAdmin() || (isAuthenticated() && resource.data.studentId == request.auth.uid);

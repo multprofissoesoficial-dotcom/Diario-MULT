@@ -1381,6 +1381,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                       {profile.role === "master" && <option value="master" className="bg-cockpit-bg">Master</option>}
                       <option value="coordenador" className="bg-cockpit-bg">Coordenador</option>
                       <option value="professor" className="bg-cockpit-bg">Professor</option>
+                      <option value="rh" className="bg-cockpit-bg">Estagiária de RH</option>
                       <option value="aluno" className="bg-cockpit-bg">Aluno</option>
                     </select>
                   </div>
@@ -1498,6 +1499,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                       {profile.role === "master" && <option value="master" className="bg-cockpit-bg">Master</option>}
                       <option value="coordenador" className="bg-cockpit-bg">Coordenador</option>
                       <option value="professor" className="bg-cockpit-bg">Professor</option>
+                      <option value="rh" className="bg-cockpit-bg">Estagiária de RH</option>
                       <option value="aluno" className="bg-cockpit-bg">Aluno</option>
                     </select>
                   </div>

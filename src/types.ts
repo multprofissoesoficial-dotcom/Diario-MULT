@@ -42,10 +42,19 @@ export interface UserProfile {
   createdAt: string;
 }
 
+export interface Company {
+  id: string;
+  name: string;
+  contactPerson: string;
+  phone: string;
+  createdAt: string;
+}
+
 export interface JobPosting {
   id: string;
   title: string;
-  company: string;
+  companyId: string;
+  companyName?: string; // Denormalized for easier display
   description: string;
   requiredSkills: SkillTag[];
   status: 'aberta' | 'fechada';
@@ -53,11 +62,14 @@ export interface JobPosting {
   createdByUid: string;
 }
 
+export type ApplicationStatus = 'pendente' | 'encaminhado' | 'contratado' | 'rejeitado';
+
 export interface Application {
   id: string;
   jobId: string;
   studentId: string;
   matchScore: number;
+  status: ApplicationStatus;
   appliedAt: string;
 }
 

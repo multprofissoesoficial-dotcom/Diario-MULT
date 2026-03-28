@@ -27,14 +27,15 @@
       "properties": {
         "id": { "type": "string" },
         "title": { "type": "string" },
-        "company": { "type": "string" },
+        "companyId": { "type": "string" },
+        "companyName": { "type": "string" },
         "description": { "type": "string" },
         "requiredSkills": { "type": "array", "items": { "type": "string" } },
         "status": { "type": "string", "enum": ["aberta", "fechada"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "createdByUid": { "type": "string" }
       },
-      "required": ["title", "company", "requiredSkills", "status"]
+      "required": ["title", "companyId", "requiredSkills", "status"]
     },
     "Application": {
       "title": "Application",
@@ -45,9 +46,23 @@
         "jobId": { "type": "string" },
         "studentId": { "type": "string" },
         "matchScore": { "type": "integer" },
+        "status": { "type": "string", "enum": ["pendente", "encaminhado", "contratado", "rejeitado"] },
         "appliedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["jobId", "studentId", "matchScore", "appliedAt"]
+      "required": ["jobId", "studentId", "matchScore", "status", "appliedAt"]
+    },
+    "Company": {
+      "title": "Company",
+      "description": "Partner company for job postings.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "contactPerson": { "type": "string" },
+        "phone": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "contactPerson", "phone", "createdAt"]
     },
     "Franquia": {
       "title": "Franquia",
@@ -102,6 +117,10 @@
     "/applications/{applicationId}": {
       "schema": "Application",
       "description": "Collection of job applications."
+    },
+    "/companies/{companyId}": {
+      "schema": "Company",
+      "description": "Collection of partner companies."
     }
   }
 }
