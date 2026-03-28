@@ -29,7 +29,7 @@ export async function POST(request: Request) {
       callerDoc = await adminDb.collection("users").doc(callerUid).get();
     } catch (err) {
       console.error("Error fetching caller doc:", err);
-      return NextResponse.json({ error: "Não autorizado (erro ao buscar perfil)" }, { status: 403 });
+      return NextResponse.json({ error: `Não autorizado (erro ao buscar perfil: ${err instanceof Error ? err.message : String(err)})` }, { status: 403 });
     }
  
     if (!callerDoc.exists) {
