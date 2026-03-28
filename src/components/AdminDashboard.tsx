@@ -1117,9 +1117,9 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                   <AlertCircle className="w-3 h-3" /> Formato Recomendado (Ponto e Vírgula):
                 </p>
                 <code className="text-[10px] text-gray-400 block bg-black/40 p-2 rounded font-mono">
-                  Nome Completo;Código;Unidade;Senha Temporária<br/>
-                  João Silva;12345;unidade-01;senha123<br/>
-                  Maria Souza;67890;unidade-01;senha456
+                  Nome Completo;Código;Unidade;Senha Temporária;Turma<br/>
+                  João Silva;12345;unidade-01;senha123;024inf<br/>
+                  Maria Souza;67890;unidade-01;senha456;024inf
                 </code>
               </div>
 
@@ -1147,6 +1147,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                         <th className="p-2 border-b border-white/10">Nome</th>
                         <th className="p-2 border-b border-white/10">Código</th>
                         <th className="p-2 border-b border-white/10">Unidade</th>
+                        <th className="p-2 border-b border-white/10">Turma</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1155,6 +1156,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                           <td className="p-2">{row["Nome Completo"] || row["nome"]}</td>
                           <td className="p-2">{row["Código"] || row["codigo"] || row["Matrícula"] || row["matricula"]}</td>
                           <td className="p-2">{row["Unidade"] || row["unidade"]}</td>
+                          <td className="p-2">{row["Turma"] || row["turma"]}</td>
                         </tr>
                       ))}
                     </tbody>

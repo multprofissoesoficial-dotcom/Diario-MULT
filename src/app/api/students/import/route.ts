@@ -124,8 +124,8 @@ export async function POST(request: Request) {
           }
 
           const userRef = adminDb.collection("users").doc(userRecord.uid);
-          // Rule 1: Use batch.set with merge: true
-          batch.set(userRef, {
+          
+          const studentData = {
             uid: userRecord.uid,
             displayName: nome,
             email: finalEmail,
@@ -136,7 +136,9 @@ export async function POST(request: Request) {
             xp: 0,
             unlockedBadges: [],
             createdAt: new Date().toISOString(),
-          }, { merge: true });
+          };
+
+          batch.set(userRef, studentData, { merge: true });
 
           results.success++;
         } catch (err) {
