@@ -217,6 +217,11 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
   };
 
   const handleApply = async (job: JobPosting) => {
+    if (profile.availabilityStatus === 'Bloqueado') {
+      alert("Seu perfil está bloqueado para novos encaminhamentos conforme as normas da agência. Procure a coordenação para mais informações.");
+      return;
+    }
+
     if (!profile.skills || profile.skills.length === 0) {
       alert("Por favor, preencha suas habilidades no perfil profissional antes de se candidatar.");
       return;
@@ -620,6 +625,30 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
                   <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-6 flex items-center gap-2">
                     <UserIcon className="w-4 h-4 text-neon-blue" /> Meu Perfil Profissional
                   </h3>
+
+                  {profile.availabilityStatus && (
+                    <div className={cn(
+                      "mb-6 p-4 rounded-xl border flex items-center justify-between",
+                      profile.availabilityStatus === 'Disponível' ? "bg-green-500/10 border-green-500/30 text-green-400" :
+                      profile.availabilityStatus === 'Bloqueado' ? "bg-red-500/10 border-red-500/30 text-red-400" :
+                      "bg-neon-blue/10 border-neon-blue/30 text-neon-blue"
+                    )}>
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "w-8 h-8 rounded-lg flex items-center justify-center",
+                          profile.availabilityStatus === 'Disponível' ? "bg-green-500/20" :
+                          profile.availabilityStatus === 'Bloqueado' ? "bg-red-500/20" :
+                          "bg-neon-blue/20"
+                        )}>
+                          <Zap className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest opacity-70">Status de Disponibilidade</p>
+                          <p className="text-sm font-black uppercase tracking-tighter">{profile.availabilityStatus}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   
                   <form onSubmit={handleProfileUpdate} className="space-y-6">
                     <div className="space-y-4">

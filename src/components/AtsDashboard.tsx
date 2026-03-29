@@ -67,6 +67,19 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
   const [selectedDocType, setSelectedDocType] = useState<"apresentacao" | "confirmacao" | null>(null);
   const [showDocDropdown, setShowDocDropdown] = useState(false);
 
+  // CRM Temp States
+  const [tempPerceptionNotes, setTempPerceptionNotes] = useState("");
+  const [tempWithdrawalReason, setTempWithdrawalReason] = useState("");
+  const [isSavingCRM, setIsSavingCRM] = useState(false);
+
+  useEffect(() => {
+    if (selectedCandidate) {
+      const franquiaId = profile.franquiaId || "global";
+      setTempPerceptionNotes(selectedCandidate.student?.perceptions?.[franquiaId]?.notes || "");
+      setTempWithdrawalReason(selectedCandidate.student?.withdrawalReason || "");
+    }
+  }, [selectedCandidate, profile.franquiaId]);
+
   // New Job Form State
   const [newJob, setNewJob] = useState({
     title: "",
@@ -184,31 +197,57 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
-  const updateApplicationStatus = async (appId: string, newStatus: ApplicationStatus) => {
+  const updateApplicationStatus = async (appId: string, newStatus: ApplicationStatus, withdrawalReason?: string) => {
     try {
+      const app = applications.find(a => a.id === appId);
+      if (!app || !app.student) return;
+
       const historyEntry = {
         status: newStatus,
         date: new Date().toISOString(),
         updatedByRole: profile.role
       };
 
+      // Update Application
       await updateDoc(doc(db, "applications", appId), { 
         status: newStatus,
         statusHistory: arrayUnion(historyEntry)
       });
+
+      // Update Student Profile (Availability & History)
+      let availabilityStatus: UserProfile['availabilityStatus'] = 'Disponível';
+      if (newStatus === 'encaminhado') availabilityStatus = 'Em Processo Selecionado';
+      if (newStatus === 'contratado') availabilityStatus = 'Empregado';
+      if (newStatus === 'faltou' || newStatus === 'desistiu') availabilityStatus = 'Bloqueado';
+
+      const employmentEntry: any = {
+        date: new Date().toISOString(),
+        companyName: selectedJob?.companyName || "Desconhecida",
+        jobTitle: selectedJob?.title || "Vaga",
+        event: newStatus,
+        notes: withdrawalReason || ""
+      };
+
+      await updateDoc(doc(db, "users", app.studentId), {
+        availabilityStatus,
+        withdrawalReason: withdrawalReason || app.student.withdrawalReason || "",
+        employmentHistory: arrayUnion(employmentEntry)
+      });
       
       // Update local state for immediate feedback
-      setApplications(prev => prev.map(app => app.id === appId ? { 
-        ...app, 
+      setApplications(prev => prev.map(a => a.id === appId ? { 
+        ...a, 
         status: newStatus,
-        statusHistory: app.statusHistory ? [...app.statusHistory, historyEntry] : [historyEntry]
-      } : app));
+        statusHistory: a.statusHistory ? [...a.statusHistory, historyEntry] : [historyEntry],
+        student: a.student ? { ...a.student, availabilityStatus, withdrawalReason: withdrawalReason || a.student.withdrawalReason } : undefined
+      } : a));
 
       if (selectedCandidate?.id === appId) {
         setSelectedCandidate(prev => prev ? {
           ...prev,
           status: newStatus,
-          statusHistory: prev.statusHistory ? [...prev.statusHistory, historyEntry] : [historyEntry]
+          statusHistory: prev.statusHistory ? [...prev.statusHistory, historyEntry] : [historyEntry],
+          student: prev.student ? { ...prev.student, availabilityStatus, withdrawalReason: withdrawalReason || prev.student.withdrawalReason } : undefined
         } : null);
       }
     } catch (err) {
@@ -216,15 +255,68 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
-  const updateApplicationCRM = async (appId: string, data: { hrNotes?: string, hrRating?: number }) => {
+  const updateStudentPerceptions = async (studentId: string, rating: number, notes: string) => {
+    setIsSavingCRM(true);
     try {
-      await updateDoc(doc(db, "applications", appId), data);
-      setApplications(prev => prev.map(app => app.id === appId ? { ...app, ...data } : app));
-      if (selectedCandidate?.id === appId) {
-        setSelectedCandidate(prev => prev ? { ...prev, ...data } : null);
+      const franquiaId = profile.franquiaId || "global";
+      await updateDoc(doc(db, "users", studentId), {
+        [`perceptions.${franquiaId}`]: { rating, notes }
+      });
+
+      // Update local state
+      setApplications(prev => prev.map(app => app.studentId === studentId ? {
+        ...app,
+        student: app.student ? {
+          ...app.student,
+          perceptions: {
+            ...app.student.perceptions,
+            [franquiaId]: { rating, notes }
+          }
+        } : undefined
+      } : app));
+
+      if (selectedCandidate?.student?.uid === studentId) {
+        setSelectedCandidate(prev => prev ? {
+          ...prev,
+          student: prev.student ? {
+            ...prev.student,
+            perceptions: {
+              ...prev.student.perceptions,
+              [franquiaId]: { rating, notes }
+            }
+          } : undefined
+        } : null);
       }
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `applications/${appId}`);
+      handleFirestoreError(err, OperationType.WRITE, `users/${studentId}`);
+    } finally {
+      setIsSavingCRM(false);
+    }
+  };
+
+  const updateWithdrawalReason = async (studentId: string, reason: string) => {
+    setIsSavingCRM(true);
+    try {
+      await updateDoc(doc(db, "users", studentId), {
+        withdrawalReason: reason
+      });
+      
+      // Update local state
+      setApplications(prev => prev.map(a => a.studentId === studentId ? {
+        ...a,
+        student: a.student ? { ...a.student, withdrawalReason: reason } : undefined
+      } : a));
+
+      if (selectedCandidate?.studentId === studentId) {
+        setSelectedCandidate(prev => prev ? {
+          ...prev,
+          student: prev.student ? { ...prev.student, withdrawalReason: reason } : undefined
+        } : null);
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `users/${studentId}`);
+    } finally {
+      setIsSavingCRM(false);
     }
   };
 
@@ -396,21 +488,36 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
                           </div>
                         </td>
                         <td className="p-4">
-                          <select 
-                            value={app.status || "pendente"}
-                            onChange={(e) => updateApplicationStatus(app.id, e.target.value as ApplicationStatus)}
-                            className={cn(
-                              "bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-widest focus:outline-none transition-all",
-                              app.status === "contratado" ? "text-yellow-500 border-yellow-500/30" :
-                              app.status === "encaminhado" ? "text-green-500 border-green-500/30" :
-                              app.status === "rejeitado" ? "text-red-500 border-red-500/30" : "text-gray-400"
+                          <div className="flex flex-col gap-1">
+                            <select 
+                              value={app.status || "pendente"}
+                              onChange={(e) => updateApplicationStatus(app.id, e.target.value as ApplicationStatus)}
+                              className={cn(
+                                "bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-widest focus:outline-none transition-all",
+                                app.status === "contratado" ? "text-yellow-500 border-yellow-500/30" :
+                                app.status === "encaminhado" ? "text-green-500 border-green-500/30" :
+                                app.status === "rejeitado" ? "text-red-500 border-red-500/30" : 
+                                (app.status === "faltou" || app.status === "desistiu") ? "text-orange-500 border-orange-500/30" : "text-gray-400"
+                              )}
+                            >
+                              <option value="pendente">Pendente</option>
+                              <option value="encaminhado">Encaminhado</option>
+                              <option value="contratado">Contratado</option>
+                              <option value="rejeitado">Rejeitado</option>
+                              <option value="faltou">Faltou (Regra 1ª)</option>
+                              <option value="desistiu">Desistiu (Regra 2ª)</option>
+                            </select>
+                            {app.student?.availabilityStatus && (
+                              <span className={cn(
+                                "text-[8px] font-bold uppercase tracking-tighter px-1.5 py-0.5 rounded w-fit",
+                                app.student.availabilityStatus === 'Bloqueado' ? "bg-red-500/20 text-red-500" :
+                                app.student.availabilityStatus === 'Empregado' ? "bg-yellow-500/20 text-yellow-500" :
+                                app.student.availabilityStatus === 'Em Processo Selecionado' ? "bg-neon-blue/20 text-neon-blue" : "bg-green-500/20 text-green-500"
+                              )}>
+                                {app.student.availabilityStatus}
+                              </span>
                             )}
-                          >
-                            <option value="pendente">Pendente</option>
-                            <option value="encaminhado">Encaminhado</option>
-                            <option value="contratado">Contratado</option>
-                            <option value="rejeitado">Rejeitado</option>
-                          </select>
+                          </div>
                         </td>
                         <td className="p-4 text-right">
                           <div className="flex items-center justify-end gap-2">
@@ -900,43 +1007,89 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
                   {/* Left Column: CRM & Notes */}
                   <div className="space-y-6">
                     <div className="glass-card p-6 border-white/10">
-                      <h3 className="text-xs font-black uppercase tracking-widest text-mult-orange mb-4 flex items-center gap-2">
-                        <Star className="w-4 h-4" /> Inteligência de CRM
-                      </h3>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-xs font-black uppercase tracking-widest text-mult-orange flex items-center gap-2">
+                          <Star className="w-4 h-4" /> Inteligência de CRM
+                        </h3>
+                        {selectedCandidate.student?.availabilityStatus && (
+                          <span className={cn(
+                            "text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border",
+                            selectedCandidate.student.availabilityStatus === 'Bloqueado' ? "bg-red-500/20 text-red-500 border-red-500/30" :
+                            selectedCandidate.student.availabilityStatus === 'Empregado' ? "bg-yellow-500/20 text-yellow-500 border-yellow-500/30" :
+                            selectedCandidate.student.availabilityStatus === 'Em Processo Selecionado' ? "bg-neon-blue/20 text-neon-blue border-neon-blue/30" : "bg-green-500/20 text-green-500 border-green-500/30"
+                          )}>
+                            {selectedCandidate.student.availabilityStatus}
+                          </span>
+                        )}
+                      </div>
                       
                       <div className="space-y-6">
                         <div>
-                          <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest block mb-2">Avaliação do RH</label>
+                          <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest block mb-2">Avaliação Geral (Rating)</label>
                           <div className="flex gap-1">
                             {[1, 2, 3, 4, 5].map((star) => (
                               <button
                                 key={star}
-                                onClick={() => updateApplicationCRM(selectedCandidate.id, { hrRating: star })}
+                                onClick={() => updateStudentPerceptions(
+                                  selectedCandidate.studentId, 
+                                  star, 
+                                  selectedCandidate.student?.perceptions?.[profile.franquiaId || "global"]?.notes || ""
+                                )}
                                 className="transition-transform hover:scale-110 active:scale-95"
                               >
                                 <Star 
                                   className={cn(
                                     "w-6 h-6",
-                                    (selectedCandidate.hrRating || 0) >= star 
+                                    (selectedCandidate.student?.perceptions?.[profile.franquiaId || "global"]?.rating || 0) >= star 
                                       ? "text-yellow-500 fill-yellow-500 neon-glow-yellow" 
                                       : "text-gray-600"
                                   )} 
-                                />
+                                  />
                               </button>
                             ))}
                           </div>
                         </div>
 
                         <div>
-                          <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest block mb-2">Anotações Internas Privadas</label>
+                          <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest block mb-2">Percepções Pessoais (Franquia)</label>
                           <textarea 
-                            value={selectedCandidate.hrNotes || ""}
-                            onChange={(e) => updateApplicationCRM(selectedCandidate.id, { hrNotes: e.target.value })}
-                            placeholder="Descreva o perfil comportamental, pontos fortes e observações da entrevista..."
-                            className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-sm text-gray-300 focus:outline-none focus:border-mult-orange min-h-[150px] transition-all"
+                            value={tempPerceptionNotes}
+                            onChange={(e) => setTempPerceptionNotes(e.target.value)}
+                            placeholder="Descreva o perfil comportamental, pontos fortes e observações da unidade..."
+                            className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-sm text-gray-300 focus:outline-none focus:border-mult-orange min-h-[120px] transition-all"
                           />
-                          <p className="text-[9px] text-gray-500 mt-2 italic">* Visível apenas para Master, Coordenador e RH.</p>
+                          <button 
+                            onClick={() => updateStudentPerceptions(
+                              selectedCandidate.studentId,
+                              selectedCandidate.student?.perceptions?.[profile.franquiaId || "global"]?.rating || 0,
+                              tempPerceptionNotes
+                            )}
+                            disabled={isSavingCRM}
+                            className="mt-2 w-full py-2 bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all"
+                          >
+                            {isSavingCRM ? "SALVANDO..." : "SALVAR PERCEPÇÕES"}
+                          </button>
                         </div>
+
+                        {(selectedCandidate.status === 'faltou' || selectedCandidate.status === 'desistiu' || selectedCandidate.student?.availabilityStatus === 'Bloqueado') && (
+                          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl space-y-3">
+                            <label className="text-[10px] font-black text-red-500 uppercase tracking-widest block">Motivo da Desistência / Penalidade</label>
+                            <textarea 
+                              value={tempWithdrawalReason}
+                              onChange={(e) => setTempWithdrawalReason(e.target.value)}
+                              placeholder="Conforme regulamento: Faltou sem justificativa ou desistiu na contratação..."
+                              className="w-full bg-black/40 border border-red-500/30 rounded-lg p-3 text-xs text-red-200 focus:outline-none focus:border-red-500 min-h-[80px]"
+                            />
+                            <button 
+                              onClick={() => updateWithdrawalReason(selectedCandidate.studentId, tempWithdrawalReason)}
+                              disabled={isSavingCRM}
+                              className="w-full py-2 bg-red-500/20 hover:bg-red-500/30 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all text-red-400"
+                            >
+                              {isSavingCRM ? "SALVANDO..." : "SALVAR MOTIVO DA PENALIDADE"}
+                            </button>
+                            <p className="text-[9px] text-red-500/70 italic">Regra 1ª: Falta sem justificativa | Regra 2ª: Desistência na contratação.</p>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -961,50 +1114,54 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
                   <div className="space-y-6">
                     <div className="glass-card p-6 border-white/10">
                       <h3 className="text-xs font-black uppercase tracking-widest text-green-500 mb-6 flex items-center gap-2">
-                        <History className="w-4 h-4" /> Histórico de Jornada
+                        <History className="w-4 h-4" /> Histórico de Jornada Global
                       </h3>
                       
                       <div className="relative space-y-8 before:absolute before:inset-0 before:ml-4 before:-translate-x-px before:h-full before:w-0.5 before:bg-gradient-to-b before:from-green-500 before:via-neon-blue before:to-transparent">
-                        {/* Initial Application */}
-                        <div className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
-                          <div className="flex items-center justify-center w-8 h-8 rounded-full border border-white/10 bg-cockpit-bg text-gray-500 shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2">
-                            <Clock className="w-4 h-4" />
-                          </div>
-                          <div className="w-[calc(100%-3rem)] md:w-[calc(50%-1.5rem)] p-4 rounded-xl bg-white/5 border border-white/10 ml-4">
-                            <div className="flex items-center justify-between space-x-2 mb-1">
-                              <div className="font-black text-xs text-white uppercase tracking-widest">Candidatura Realizada</div>
-                              <time className="font-mono text-[9px] text-gray-500">
-                                {new Date(selectedCandidate.appliedAt).toLocaleDateString()}
-                              </time>
-                            </div>
-                            <div className="text-[10px] text-gray-400">O aluno iniciou o processo para esta vaga.</div>
-                          </div>
-                        </div>
-
-                        {/* Status History */}
-                        {selectedCandidate.statusHistory?.map((entry, idx) => (
-                          <div key={idx} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+                        {/* Employment History from User Document */}
+                        {selectedCandidate.student?.employmentHistory?.slice().reverse().map((entry, idx) => (
+                          <div key={`hist-${idx}`} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
                             <div className={cn(
                               "flex items-center justify-center w-8 h-8 rounded-full border shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2",
-                              entry.status === 'contratado' ? "bg-yellow-500/20 border-yellow-500 text-yellow-500" :
-                              entry.status === 'encaminhado' ? "bg-green-500/20 border-green-500 text-green-500" :
-                              entry.status === 'rejeitado' ? "bg-red-500/20 border-red-500 text-red-500" : "bg-white/5 border-white/10 text-gray-500"
+                              entry.event === 'contratado' ? "bg-yellow-500/20 border-yellow-500 text-yellow-500" :
+                              entry.event === 'encaminhado' ? "bg-green-500/20 border-green-500 text-green-500" :
+                              (entry.event === 'faltou' || entry.event === 'desistiu') ? "bg-red-500/20 border-red-500 text-red-500" : "bg-white/5 border-white/10 text-gray-500"
                             )}>
-                              {entry.status === 'contratado' ? <Trophy className="w-4 h-4" /> : 
-                               entry.status === 'encaminhado' ? <UserCheck className="w-4 h-4" /> : 
-                               entry.status === 'rejeitado' ? <XCircle className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+                              {entry.event === 'contratado' ? <Trophy className="w-4 h-4" /> : 
+                               entry.event === 'encaminhado' ? <UserCheck className="w-4 h-4" /> : 
+                               (entry.event === 'faltou' || entry.event === 'desistiu') ? <XCircle className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
                             </div>
                             <div className="w-[calc(100%-3rem)] md:w-[calc(50%-1.5rem)] p-4 rounded-xl bg-white/5 border border-white/10 ml-4">
                               <div className="flex items-center justify-between space-x-2 mb-1">
-                                <div className="font-black text-xs text-white uppercase tracking-widest">Status: {entry.status}</div>
+                                <div className="font-black text-[10px] text-white uppercase tracking-widest">{entry.companyName}</div>
                                 <time className="font-mono text-[9px] text-gray-500">
                                   {new Date(entry.date).toLocaleDateString()}
                                 </time>
                               </div>
-                              <div className="text-[10px] text-gray-400">Atualizado por: <span className="uppercase">{entry.updatedByRole}</span></div>
+                              <div className="text-[10px] text-neon-blue font-bold uppercase tracking-widest">{entry.jobTitle}</div>
+                              <div className="text-[9px] text-gray-400 mt-1 uppercase font-black">Evento: {entry.event}</div>
+                              {entry.notes && <div className="text-[9px] text-red-400 mt-1 italic">Obs: {entry.notes}</div>}
                             </div>
                           </div>
                         ))}
+
+                        {/* Current Application Initial Step if no history matches */}
+                        {(!selectedCandidate.student?.employmentHistory || selectedCandidate.student.employmentHistory.length === 0) && (
+                          <div className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+                            <div className="flex items-center justify-center w-8 h-8 rounded-full border border-white/10 bg-cockpit-bg text-gray-500 shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2">
+                              <Clock className="w-4 h-4" />
+                            </div>
+                            <div className="w-[calc(100%-3rem)] md:w-[calc(50%-1.5rem)] p-4 rounded-xl bg-white/5 border border-white/10 ml-4">
+                              <div className="flex items-center justify-between space-x-2 mb-1">
+                                <div className="font-black text-xs text-white uppercase tracking-widest">Candidatura Realizada</div>
+                                <time className="font-mono text-[9px] text-gray-500">
+                                  {new Date(selectedCandidate.appliedAt).toLocaleDateString()}
+                                </time>
+                              </div>
+                              <div className="text-[10px] text-gray-400">O aluno iniciou o processo para esta vaga.</div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

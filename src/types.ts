@@ -26,6 +26,21 @@ export interface Franquia {
   createdAt: string;
 }
 
+export type AvailabilityStatus = 
+  | 'Disponível' 
+  | 'Em Processo Selecionado' 
+  | 'Empregado' 
+  | 'Pendente de Orientação' 
+  | 'Bloqueado';
+
+export interface EmploymentHistoryEntry {
+  date: any;
+  companyName: string;
+  jobTitle: string;
+  event: 'encaminhado' | 'entrevista' | 'contratado' | 'rejeitado' | 'faltou' | 'desistiu';
+  notes?: string;
+}
+
 export interface UserProfile {
   uid: string;
   displayName: string;
@@ -41,6 +56,10 @@ export interface UserProfile {
   phone?: string;
   atsTermsAccepted?: boolean;
   atsTermsAcceptedAt?: any;
+  availabilityStatus?: AvailabilityStatus;
+  withdrawalReason?: string;
+  perceptions?: Record<string, { rating: number; notes: string }>; // Keyed by franquiaId
+  employmentHistory?: EmploymentHistoryEntry[];
   createdAt: string;
 }
 
@@ -66,7 +85,7 @@ export interface JobPosting {
   createdByUid: string;
 }
 
-export type ApplicationStatus = 'pendente' | 'encaminhado' | 'contratado' | 'rejeitado';
+export type ApplicationStatus = 'pendente' | 'encaminhado' | 'contratado' | 'rejeitado' | 'faltou' | 'desistiu';
 
 export interface StatusHistoryEntry {
   status: ApplicationStatus;

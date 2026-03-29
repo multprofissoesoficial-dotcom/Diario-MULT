@@ -12,7 +12,8 @@ import {
   onSnapshot,
   orderBy,
   limit,
-  startAfter
+  startAfter,
+  getCountFromServer
 } from "firebase/firestore";
 import { 
   getAuth, 
@@ -52,7 +53,8 @@ import {
   Clock,
   Eye,
   Lock as LockIcon,
-  Briefcase
+  Briefcase,
+  UserCheck
 } from "lucide-react";
 
 export default function AdminDashboard({ profile }: { profile: UserProfile }) {
@@ -86,6 +88,30 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [dateFilter, setDateFilter] = useState({ start: "", end: "" });
   const [activitySearch, setActivitySearch] = useState("");
   const [activityStatusFilter, setActivityStatusFilter] = useState<string>("all");
+
+  // Global Counts
+  const [counts, setCounts] = useState({
+    users: {
+      total: 0,
+      aluno: 0,
+      professor: 0,
+      coordenador: 0,
+      rh: 0,
+      pending: 0
+    },
+    missions: {
+      total: 0,
+      pending: 0,
+      approved: 0,
+      bonus: 0
+    },
+    ats: {
+      vagasAbertas: 0,
+      totalCandidaturas: 0,
+      encaminhados: 0,
+      contratados: 0
+    }
+  });
   
   // Form states
   const [newUser, setNewUser] = useState({
@@ -99,6 +125,27 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   });
   const [newFranquia, setNewFranquia] = useState({ id: "", nome: "", cidade: "" });
   const [successMsg, setSuccessMsg] = useState("");
+  const [turmas, setTurmas] = useState<string[]>([]);
+
+  useEffect(() => {
+    // Fetch unique turmas
+    const fetchTurmas = async () => {
+      try {
+        let q = query(collection(db, "users"), where("role", "==", "aluno"), limit(1000));
+        if (profile.role !== "master") {
+          q = query(q, where("franquiaId", "==", profile.franquiaId));
+        } else if (selectedFranquia !== "all") {
+          q = query(q, where("franquiaId", "==", selectedFranquia));
+        }
+        const snap = await getDocs(q);
+        const uniqueTurmas = Array.from(new Set(snap.docs.map(d => d.data().turma).filter(Boolean)));
+        setTurmas(uniqueTurmas as string[]);
+      } catch (err) {
+        console.error("Error fetching turmas:", err);
+      }
+    };
+    fetchTurmas();
+  }, [selectedFranquia, profile.franquiaId, profile.role]);
 
   useEffect(() => {
     // Listen to Franquias
@@ -113,6 +160,75 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     // Initial fetch of users
     fetchUsers(true);
   }, [selectedFranquia, profile.franquiaId, profile.role, roleFilter, turmaFilter, searchQuery]);
+
+  useEffect(() => {
+    fetchCounts();
+  }, [selectedFranquia, profile.franquiaId, profile.role]);
+
+  const fetchCounts = async () => {
+    try {
+      const userBaseQuery = collection(db, "users");
+      const missionBaseQuery = collection(db, "missions");
+      const jobBaseQuery = collection(db, "job_postings");
+      const applicationBaseQuery = collection(db, "applications");
+
+      const getCount = async (base: any, filters: any[] = []) => {
+        let q = query(base, ...filters);
+        if (profile.role !== "master") {
+          q = query(q, where("franquiaId", "==", profile.franquiaId));
+        } else if (selectedFranquia !== "all") {
+          q = query(q, where("franquiaId", "==", selectedFranquia));
+        }
+        const snap = await getCountFromServer(q);
+        return snap.data().count;
+      };
+
+      const [
+        totalUsers, alunoCount, professorCount, coordenadorCount, rhCount,
+        totalMissions, pendingMissionsCount, approvedMissionsCount, bonusMissionsCount,
+        vagasAbertasCount, totalCandidaturasCount, encaminhadosCount, contratadosCount
+      ] = await Promise.all([
+        getCount(userBaseQuery),
+        getCount(userBaseQuery, [where("role", "==", "aluno")]),
+        getCount(userBaseQuery, [where("role", "==", "professor")]),
+        getCount(userBaseQuery, [where("role", "==", "coordenador")]),
+        getCount(userBaseQuery, [where("role", "==", "rh")]),
+        getCount(missionBaseQuery),
+        getCount(missionBaseQuery, [where("status", "==", "pending")]),
+        getCount(missionBaseQuery, [where("status", "==", "approved")]),
+        getCount(missionBaseQuery, [where("status", "==", "bonus")]),
+        getCount(jobBaseQuery, [where("status", "==", "aberta")]),
+        getCount(applicationBaseQuery),
+        getCount(applicationBaseQuery, [where("status", "==", "encaminhado")]),
+        getCount(applicationBaseQuery, [where("status", "==", "contratado")])
+      ]);
+
+      setCounts({
+        users: {
+          total: totalUsers,
+          aluno: alunoCount,
+          professor: professorCount,
+          coordenador: coordenadorCount,
+          rh: rhCount,
+          pending: pendingMissionsCount
+        },
+        missions: {
+          total: totalMissions,
+          pending: pendingMissionsCount,
+          approved: approvedMissionsCount,
+          bonus: bonusMissionsCount
+        },
+        ats: {
+          vagasAbertas: vagasAbertasCount,
+          totalCandidaturas: totalCandidaturasCount,
+          encaminhados: encaminhadosCount,
+          contratados: contratadosCount
+        }
+      });
+    } catch (err: any) {
+      console.error("Error fetching counts:", err);
+    }
+  };
 
   const fetchUsers = async (reset = false) => {
     setLoading(true);
@@ -133,9 +249,16 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         q = query(q, where("turma", "==", turmaFilter));
       }
 
-      // Note: Search with where is limited in Firestore. 
-      // For now we'll keep the client-side filtering for search or implement a better search later.
-      // But we'll limit the initial fetch.
+      if (searchQuery) {
+        // Server-side search logic
+        q = query(q, 
+          where("displayName", ">=", searchQuery),
+          where("displayName", "<=", searchQuery + "\uf8ff")
+        );
+      } else {
+        // If no search, we can order by displayName for consistency
+        q = query(q, orderBy("displayName"));
+      }
 
       if (!reset && lastDoc) {
         q = query(q, startAfter(lastDoc));
@@ -252,7 +375,11 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   };
 
   const filteredUsers = users.filter(u => {
-    const matchesSearch = u.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    // Search is now handled server-side in fetchUsers for displayName.
+    // We can still keep a client-side check for email/codigo if they were already loaded,
+    // but the main search is now server-driven.
+    const matchesSearch = !searchQuery || 
+      u.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (u.codigo && u.codigo.includes(searchQuery));
     
@@ -680,121 +807,211 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           </div>
         </div>
 
-        <button 
-          onClick={() => {
-            setActiveTab("users");
-            setRoleFilter("aluno");
-            setPendingOnly(false);
-            setCurrentPage(1);
-          }}
-          className={cn(
-            "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
-            roleFilter === "aluno" && !pendingOnly ? "border-neon-blue bg-neon-blue/10" : "hover:bg-white/5"
-          )}
-        >
-          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue neon-glow-blue border border-neon-blue/20">
-            <Users className="w-5 h-5 sm:w-6 sm:h-6" />
-          </div>
-          <div>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Alunos</p>
-            <p className="text-xl sm:text-2xl font-black">{totalAlunos}</p>
-          </div>
-        </button>
+        {activeTab === "users" ? (
+          <>
+            <button 
+              onClick={() => { setRoleFilter("aluno"); setPendingOnly(false); }}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
+                roleFilter === "aluno" && !pendingOnly ? "border-neon-blue bg-neon-blue/10" : "hover:bg-white/5"
+              )}
+            >
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue neon-glow-blue border border-neon-blue/20">
+                <Users className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Alunos</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.users.aluno}</p>
+              </div>
+            </button>
 
-        <button 
-          onClick={() => {
-            setActiveTab("users");
-            setRoleFilter("professor");
-            setPendingOnly(false);
-            setCurrentPage(1);
-          }}
-          className={cn(
-            "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
-            roleFilter === "professor" && !pendingOnly ? "border-mult-orange bg-mult-orange/10" : "hover:bg-white/5"
-          )}
-        >
-          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-mult-orange/20 flex items-center justify-center text-mult-orange neon-glow-orange border border-mult-orange/20">
-            <Rocket className="w-5 h-5 sm:w-6 sm:h-6" />
-          </div>
-          <div>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Professores</p>
-            <p className="text-xl sm:text-2xl font-black">{totalProfessores}</p>
-          </div>
-        </button>
+            <button 
+              onClick={() => { setRoleFilter("professor"); setPendingOnly(false); }}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
+                roleFilter === "professor" && !pendingOnly ? "border-mult-orange bg-mult-orange/10" : "hover:bg-white/5"
+              )}
+            >
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-mult-orange/20 flex items-center justify-center text-mult-orange neon-glow-orange border border-mult-orange/20">
+                <Rocket className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Professores</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.users.professor}</p>
+              </div>
+            </button>
 
-        <button 
-          onClick={() => {
-            setActiveTab("users");
-            setRoleFilter("coordenador");
-            setPendingOnly(false);
-            setCurrentPage(1);
-          }}
-          className={cn(
-            "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
-            roleFilter === "coordenador" && !pendingOnly ? "border-purple-500 bg-purple-500/10" : "hover:bg-white/5"
-          )}
-        >
-          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-purple-500/20 flex items-center justify-center text-purple-400 neon-glow-purple border border-purple-500/20">
-            <Building2 className="w-5 h-5 sm:w-6 sm:h-6" />
-          </div>
-          <div>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Coordenadores</p>
-            <p className="text-xl sm:text-2xl font-black">{totalCoordenadores}</p>
-          </div>
-        </button>
+            <button 
+              onClick={() => { setRoleFilter("coordenador"); setPendingOnly(false); }}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
+                roleFilter === "coordenador" && !pendingOnly ? "border-purple-500 bg-purple-500/10" : "hover:bg-white/5"
+              )}
+            >
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-purple-500/20 flex items-center justify-center text-purple-400 neon-glow-purple border border-purple-500/20">
+                <Building2 className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Coordenadores</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.users.coordenador}</p>
+              </div>
+            </button>
 
-        <button 
-          onClick={() => {
-            setActiveTab("users");
-            setRoleFilter("all");
-            setPendingOnly(true);
-            setCurrentPage(1);
-          }}
-          className={cn(
-            "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
-            pendingOnly ? "border-yellow-500 bg-yellow-500/10" : "hover:bg-white/5"
-          )}
-        >
-          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-yellow-500/20 flex items-center justify-center text-yellow-400 neon-glow-yellow border border-yellow-500/20">
-            <Clock className="w-5 h-5 sm:w-6 sm:h-6" />
-          </div>
-          <div>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Pendentes</p>
-            <p className="text-xl sm:text-2xl font-black">{pendingMissions.length}</p>
-          </div>
-        </button>
+            <button 
+              onClick={() => { setRoleFilter("rh"); setPendingOnly(false); }}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
+                roleFilter === "rh" && !pendingOnly ? "border-pink-500 bg-pink-500/10" : "hover:bg-white/5"
+              )}
+            >
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-pink-500/20 flex items-center justify-center text-pink-400 neon-glow-pink border border-pink-500/20">
+                <Users className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">RH</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.users.rh}</p>
+              </div>
+            </button>
 
-        <button 
-          onClick={() => {
-            setActiveTab("users");
-            setRoleFilter("all");
-            setPendingOnly(false);
-            setCurrentPage(1);
-          }}
-          className={cn(
-            "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
-            roleFilter === "all" && !pendingOnly ? "border-white bg-white/5" : "hover:bg-white/5"
-          )}
-        >
-          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-white/5 flex items-center justify-center text-white border border-white/10">
-            <Users className="w-5 h-5 sm:w-6 sm:h-6" />
-          </div>
-          <div>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Total Geral</p>
-            <p className="text-xl sm:text-2xl font-black">{users.length}</p>
-          </div>
-        </button>
+            <button 
+              onClick={() => { setRoleFilter("all"); setPendingOnly(false); }}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
+                roleFilter === "all" && !pendingOnly ? "border-white bg-white/5" : "hover:bg-white/5"
+              )}
+            >
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-white/5 flex items-center justify-center text-white border border-white/10">
+                <Users className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Total Geral</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.users.total}</p>
+              </div>
+            </button>
+          </>
+        ) : activeTab === "activities" ? (
+          <>
+            <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue border border-neon-blue/20">
+                <FileText className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Total Missões</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.missions.total}</p>
+              </div>
+            </div>
 
-        {/* Extra Indicator for Coordinators/Masters */}
-        <div className="glass-card p-5 sm:p-6 flex items-center gap-4 bg-neon-blue/5 border-neon-blue/20">
-          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue border border-neon-blue/20">
-            <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
-          </div>
-          <div>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Média XP / Aluno</p>
-            <p className="text-xl sm:text-2xl font-black text-neon-blue">{avgXP}</p>
-          </div>
-        </div>
+            <button 
+              onClick={() => setActivityStatusFilter("pending")}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
+                activityStatusFilter === "pending" ? "border-yellow-500 bg-yellow-500/10" : "hover:bg-white/5"
+              )}
+            >
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-yellow-500/20 flex items-center justify-center text-yellow-400 border border-yellow-500/20">
+                <Clock className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Pendentes</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.missions.pending}</p>
+              </div>
+            </button>
+
+            <button 
+              onClick={() => setActivityStatusFilter("approved")}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
+                activityStatusFilter === "approved" ? "border-green-500 bg-green-500/10" : "hover:bg-white/5"
+              )}
+            >
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-green-500/20 flex items-center justify-center text-green-400 border border-green-500/20">
+                <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Aprovadas</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.missions.approved}</p>
+              </div>
+            </button>
+
+            <button 
+              onClick={() => setActivityStatusFilter("bonus")}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all hover:scale-[1.02] active:scale-[0.98] text-left",
+                activityStatusFilter === "bonus" ? "border-purple-500 bg-purple-500/10" : "hover:bg-white/5"
+              )}
+            >
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-purple-500/20 flex items-center justify-center text-purple-400 border border-purple-500/20">
+                <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Bônus</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.missions.bonus}</p>
+              </div>
+            </button>
+
+            <div className="glass-card p-5 sm:p-6 flex items-center gap-4 bg-neon-blue/5 border-neon-blue/20">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue border border-neon-blue/20">
+                <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Média XP / Aluno</p>
+                <p className="text-xl sm:text-2xl font-black text-neon-blue">{avgXP}</p>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue border border-neon-blue/20">
+                <Briefcase className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Vagas Abertas</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.ats.vagasAbertas}</p>
+              </div>
+            </div>
+
+            <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-mult-orange/20 flex items-center justify-center text-mult-orange border border-mult-orange/20">
+                <Users className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Total Candidaturas</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.ats.totalCandidaturas}</p>
+              </div>
+            </div>
+
+            <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-green-500/20 flex items-center justify-center text-green-400 border border-green-500/20">
+                <UserCheck className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Encaminhados</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.ats.encaminhados}</p>
+              </div>
+            </div>
+
+            <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-yellow-500/20 flex items-center justify-center text-yellow-400 border border-yellow-500/20">
+                <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Contratados</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.ats.contratados}</p>
+              </div>
+            </div>
+
+            <div className="glass-card p-5 sm:p-6 flex items-center gap-4 bg-neon-blue/5 border-neon-blue/20">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue border border-neon-blue/20">
+                <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Média XP / Aluno</p>
+                <p className="text-xl sm:text-2xl font-black text-neon-blue">{avgXP}</p>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Tab Content */}
@@ -826,7 +1043,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                   className="bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-widest focus:outline-none focus:border-neon-blue transition-all"
                 >
                   <option value="all">Todas as Turmas</option>
-                  {Array.from(new Set(users.filter(u => u.turma).map(u => u.turma))).map(t => (
+                  {turmas.map(t => (
                     <option key={t} value={t}>{t}</option>
                   ))}
                 </select>
