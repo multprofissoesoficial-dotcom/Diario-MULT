@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { onAuthStateChanged, User } from "firebase/auth";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { UserProfile } from "../types";
 
@@ -29,13 +29,20 @@ export function useAuth() {
 
     const docRef = doc(db, "users", user.uid);
     
-    const unsubProfile = onSnapshot(docRef, (doc) => {
-      if (doc.exists()) {
-        const data = doc.data() as UserProfile;
+    const unsubProfile = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data() as UserProfile;
         setProfile(data);
         // Set cookies for middleware
         document.cookie = `user_uid=${user.uid}; path=/; max-age=86400; SameSite=None; Secure`;
         document.cookie = `user_role=${data.role}; path=/; max-age=86400; SameSite=None; Secure`;
+
+        // Update lastLogin if not updated recently (e.g., once a day)
+        const now = new Date().getTime();
+        const lastLoginTime = data.lastLogin?.seconds ? data.lastLogin.seconds * 1000 : 0;
+        if (now - lastLoginTime > 24 * 60 * 60 * 1000) {
+          updateDoc(docRef, { lastLogin: serverTimestamp() }).catch(console.error);
+        }
       } else {
         setProfile(null);
       }

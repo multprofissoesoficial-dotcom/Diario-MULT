@@ -60,6 +60,7 @@ export interface UserProfile {
   withdrawalReason?: string;
   perceptions?: Record<string, { rating: number; notes: string }>; // Keyed by franquiaId
   employmentHistory?: EmploymentHistoryEntry[];
+  lastLogin?: any;
   createdAt: string;
 }
 
@@ -72,6 +73,9 @@ export interface Company {
   createdAt: string;
 }
 
+export type JobStatus = 'captacao' | 'aberta' | 'encaminhado' | 'fechada';
+export type SelectionProcessType = 'Entrevista Presencial' | 'Entrega de Currículo' | 'Atendimento Online' | 'Teste Técnico';
+
 export interface JobPosting {
   id: string;
   title: string;
@@ -79,10 +83,13 @@ export interface JobPosting {
   companyName?: string; // Denormalized for easier display
   description: string;
   requiredSkills: SkillTag[];
-  status: 'aberta' | 'fechada';
+  status: JobStatus;
   franquiaId: string;
   createdAt: string;
   createdByUid: string;
+  openingDate?: string;
+  closingForecast?: string;
+  selectionProcessType?: SelectionProcessType;
 }
 
 export type ApplicationStatus = 'pendente' | 'encaminhado' | 'contratado' | 'rejeitado' | 'faltou' | 'desistiu';
@@ -114,7 +121,7 @@ export interface Mission {
   module: string;
   classNum: number;
   content: string;
-  status: "pending" | "approved" | "bonus";
+  status: "pending" | "approved" | "bonus" | "rejected";
   aiFeedback?: string;
   xpAwarded?: number;
   createdAt: string;

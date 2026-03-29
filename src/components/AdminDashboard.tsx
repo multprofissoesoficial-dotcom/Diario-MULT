@@ -9,6 +9,8 @@ import {
   doc, 
   setDoc, 
   deleteDoc,
+  updateDoc,
+  increment,
   onSnapshot,
   orderBy,
   limit,
@@ -28,10 +30,21 @@ import firebaseConfig from "../../firebase-applet-config.json";
 import { UserProfile, Franquia, Mission } from "../types";
 import { getRelativeLesson } from "../utils/lessonMapper";
 import MissionHistoryModal from "./MissionHistoryModal";
-import { ROLES_LABELS, RANKS } from "../constants";
+import { ROLES_LABELS, RANKS, XP_PER_MISSION, XP_BONUS } from "../constants";
 import { motion, AnimatePresence } from "motion/react";
 import Papa from "papaparse";
 import AtsDashboard from "./AtsDashboard";
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend, 
+  ResponsiveContainer, 
+  Cell 
+} from "recharts";
 import { 
   Users, 
   Plus, 
@@ -54,7 +67,12 @@ import {
   Eye,
   Lock as LockIcon,
   Briefcase,
-  UserCheck
+  UserCheck,
+  Target,
+  CheckCircle,
+  Zap,
+  XCircle,
+  Calendar
 } from "lucide-react";
 
 export default function AdminDashboard({ profile }: { profile: UserProfile }) {
@@ -97,7 +115,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       professor: 0,
       coordenador: 0,
       rh: 0,
-      pending: 0
+      pending: 0,
+      active: 0
     },
     missions: {
       total: 0,
@@ -106,12 +125,14 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       bonus: 0
     },
     ats: {
-      vagasAbertas: 0,
-      totalCandidaturas: 0,
-      encaminhados: 0,
-      contratados: 0
+      jobs: 0,
+      applications: 0,
+      companies: 0,
+      hired: 0
     }
   });
+  
+  const [selectedMissionForView, setSelectedMissionForView] = useState<Mission | null>(null);
   
   // Form states
   const [newUser, setNewUser] = useState({
@@ -172,6 +193,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       const jobBaseQuery = collection(db, "job_postings");
       const applicationBaseQuery = collection(db, "applications");
 
+      const companyBaseQuery = collection(db, "companies");
+
       const getCount = async (base: any, filters: any[] = []) => {
         let q = query(base, ...filters);
         if (profile.role !== "master") {
@@ -184,23 +207,24 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       };
 
       const [
-        totalUsers, alunoCount, professorCount, coordenadorCount, rhCount,
+        totalUsers, alunoCount, professorCount, coordenadorCount, rhCount, activeStudentsCount,
         totalMissions, pendingMissionsCount, approvedMissionsCount, bonusMissionsCount,
-        vagasAbertasCount, totalCandidaturasCount, encaminhadosCount, contratadosCount
+        vagasAbertasCount, totalCandidaturasCount, contratadosCount, companiesCount
       ] = await Promise.all([
         getCount(userBaseQuery),
         getCount(userBaseQuery, [where("role", "==", "aluno")]),
         getCount(userBaseQuery, [where("role", "==", "professor")]),
         getCount(userBaseQuery, [where("role", "==", "coordenador")]),
         getCount(userBaseQuery, [where("role", "==", "rh")]),
+        getCount(userBaseQuery, [where("role", "==", "aluno"), where("lastLogin", "!=", null)]),
         getCount(missionBaseQuery),
         getCount(missionBaseQuery, [where("status", "==", "pending")]),
         getCount(missionBaseQuery, [where("status", "==", "approved")]),
         getCount(missionBaseQuery, [where("status", "==", "bonus")]),
         getCount(jobBaseQuery, [where("status", "==", "aberta")]),
         getCount(applicationBaseQuery),
-        getCount(applicationBaseQuery, [where("status", "==", "encaminhado")]),
-        getCount(applicationBaseQuery, [where("status", "==", "contratado")])
+        getCount(applicationBaseQuery, [where("status", "==", "contratado")]),
+        getCount(companyBaseQuery)
       ]);
 
       setCounts({
@@ -210,7 +234,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           professor: professorCount,
           coordenador: coordenadorCount,
           rh: rhCount,
-          pending: pendingMissionsCount
+          pending: pendingMissionsCount,
+          active: activeStudentsCount
         },
         missions: {
           total: totalMissions,
@@ -219,10 +244,10 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           bonus: bonusMissionsCount
         },
         ats: {
-          vagasAbertas: vagasAbertasCount,
-          totalCandidaturas: totalCandidaturasCount,
-          encaminhados: encaminhadosCount,
-          contratados: contratadosCount
+          jobs: vagasAbertasCount,
+          applications: totalCandidaturasCount,
+          companies: companiesCount,
+          hired: contratadosCount
         }
       });
     } catch (err: any) {
@@ -663,6 +688,58 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     link.click();
     document.body.removeChild(link);
   };
+
+  const handleApproveMission = async (mission: Mission, bonus: boolean) => {
+    setLoading(true);
+    const xp = bonus ? XP_BONUS : XP_PER_MISSION;
+
+    try {
+      await Promise.all([
+        updateDoc(doc(db, "missions", mission.id), {
+          status: bonus ? "bonus" : "approved",
+          xpAwarded: xp,
+          approvedAt: new Date().toISOString(),
+          approvedBy: profile.uid
+        }),
+        updateDoc(doc(db, "users", mission.studentId), {
+          xp: increment(xp)
+        })
+      ]);
+      
+      // Update local state
+      setAllMissions(prev => prev.map(m => m.id === mission.id ? { ...m, status: bonus ? "bonus" : "approved", xpAwarded: xp } : m));
+      setSelectedMissionForView(null);
+      fetchCounts(); // Refresh counts
+      setSuccessMsg("Missão aprovada com sucesso!");
+      setTimeout(() => setSuccessMsg(""), 3000);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `missions/${mission.id} & users/${mission.studentId}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRejectMission = async (mission: Mission) => {
+    setLoading(true);
+    try {
+      await updateDoc(doc(db, "missions", mission.id), {
+        status: "rejected",
+        rejectedAt: new Date().toISOString(),
+        rejectedBy: profile.uid
+      });
+      
+      // Update local state
+      setAllMissions(prev => prev.map(m => m.id === mission.id ? { ...m, status: "rejected" } : m));
+      setSelectedMissionForView(null);
+      fetchCounts(); // Refresh counts
+      setSuccessMsg("Missão rejeitada.");
+      setTimeout(() => setSuccessMsg(""), 3000);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `missions/${mission.id}`);
+    } finally {
+      setLoading(false);
+    }
+  };
   const handleCreateFranquia = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -808,7 +885,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         </div>
 
         {activeTab === "users" ? (
-          <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
             <button 
               onClick={() => { setRoleFilter("aluno"); setPendingOnly(false); }}
               className={cn(
@@ -888,9 +965,9 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                 <p className="text-xl sm:text-2xl font-black">{counts.users.total}</p>
               </div>
             </button>
-          </>
+          </div>
         ) : activeTab === "activities" ? (
-          <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
             <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
               <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue border border-neon-blue/20">
                 <FileText className="w-5 h-5 sm:w-6 sm:h-6" />
@@ -958,60 +1035,48 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                 <p className="text-xl sm:text-2xl font-black text-neon-blue">{avgXP}</p>
               </div>
             </div>
-          </>
-        ) : (
-          <>
+          </div>
+        ) : activeTab === "ats" ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
               <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue border border-neon-blue/20">
                 <Briefcase className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
               <div>
-                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Vagas Abertas</p>
-                <p className="text-xl sm:text-2xl font-black">{counts.ats.vagasAbertas}</p>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Vagas Ativas</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.ats.jobs}</p>
               </div>
             </div>
-
             <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
               <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-mult-orange/20 flex items-center justify-center text-mult-orange border border-mult-orange/20">
                 <Users className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
               <div>
-                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Total Candidaturas</p>
-                <p className="text-xl sm:text-2xl font-black">{counts.ats.totalCandidaturas}</p>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Candidaturas</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.ats.applications}</p>
               </div>
             </div>
-
             <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
               <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-green-500/20 flex items-center justify-center text-green-400 border border-green-500/20">
-                <UserCheck className="w-5 h-5 sm:w-6 sm:h-6" />
+                <Building2 className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
               <div>
-                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Encaminhados</p>
-                <p className="text-xl sm:text-2xl font-black">{counts.ats.encaminhados}</p>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Empresas</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.ats.companies}</p>
               </div>
             </div>
-
             <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
               <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-yellow-500/20 flex items-center justify-center text-yellow-400 border border-yellow-500/20">
                 <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
               <div>
-                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Contratados</p>
-                <p className="text-xl sm:text-2xl font-black">{counts.ats.contratados}</p>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Contratações</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.ats.hired}</p>
               </div>
             </div>
+          </div>
+        ) : null}
 
-            <div className="glass-card p-5 sm:p-6 flex items-center gap-4 bg-neon-blue/5 border-neon-blue/20">
-              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue border border-neon-blue/20">
-                <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
-              </div>
-              <div>
-                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Média XP / Aluno</p>
-                <p className="text-xl sm:text-2xl font-black text-neon-blue">{avgXP}</p>
-              </div>
-            </div>
-          </>
-        )}
       </div>
 
       {/* Tab Content */}
@@ -1065,7 +1130,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[600px]">
+          {/* Desktop Table */}
+          <table className="hidden md:table w-full text-left border-collapse min-w-[600px]">
             <thead>
               <tr className="text-[10px] font-black text-gray-500 uppercase tracking-widest border-b border-white/5">
                 <th className="px-4 sm:px-6 py-4">Usuário</th>
@@ -1160,16 +1226,97 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                   </tr>
                 );
               })}
-              {currentUsers.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-6 py-20 text-center text-gray-600 italic">
-                    Nenhum usuário encontrado para os filtros selecionados.
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
+
+          {/* Mobile Card List */}
+          <div className="md:hidden divide-y divide-white/5">
+            {currentUsers.map((userItem) => {
+              const rank = RANKS.reduce((prev, curr) => (userItem.xp >= curr.minXP ? curr : prev), RANKS[0]);
+              const hasPending = pendingMissions.some(m => m.studentId === userItem.uid);
+              return (
+                <div key={userItem.uid} className="p-4 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-gray-500">
+                        <Users className="w-5 h-5" />
+                      </div>
+                      {hasPending && (
+                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-500 rounded-full border-2 border-cockpit-bg animate-pulse" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-sm truncate">{userItem.displayName}</p>
+                        {hasPending && (
+                          <span className="px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-500 text-[8px] font-black uppercase tracking-tighter border border-yellow-500/20">
+                            Pendente
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-gray-400 font-mono truncate">{userItem.email}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Cargo / Unidade</p>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[9px] font-black uppercase tracking-widest bg-white/5 px-2 py-1 rounded border border-white/10 w-fit">
+                          {ROLES_LABELS[userItem.role]}
+                        </span>
+                        <span className="text-[10px] font-bold text-gray-400">
+                          {franquias.find(f => f.id === userItem.franquiaId)?.nome || "Global"}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[8px] font-black text-gray-500 uppercase tracking-widest mb-1">Nível / XP</p>
+                      <p className={`text-[9px] font-black uppercase tracking-widest ${rank.color}`}>{rank.name}</p>
+                      <p className="text-[10px] font-bold text-gray-500">{userItem.xp} XP</p>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                    {userItem.role === "aluno" && (
+                      <button 
+                        onClick={() => setShowMissionHistory(userItem)}
+                        className="p-2 rounded-lg bg-white/5 text-gray-400"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                    )}
+                    <button 
+                      onClick={() => handleResetPassword(userItem.email)}
+                      className="p-2 rounded-lg bg-white/5 text-gray-400"
+                    >
+                      <LockIcon className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={() => setShowEditUser(userItem)}
+                      className="p-2 rounded-lg bg-white/5 text-gray-400"
+                    >
+                      <FileText className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteUser(userItem.uid)}
+                      className="p-2 rounded-lg bg-white/5 text-red-400"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {currentUsers.length === 0 && (
+            <div className="px-6 py-20 text-center text-gray-600 italic">
+              Nenhum usuário encontrado para os filtros selecionados.
+            </div>
+          )}
         </div>
+
 
         {/* Load More */}
         {hasMore && (
@@ -1185,7 +1332,63 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         )}
       </div>
       ) : (
-        <div className="glass-card overflow-hidden">
+        <div className="space-y-6">
+          {/* Engagement Chart */}
+          <div className="glass-card p-6">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="text-sm font-black uppercase tracking-widest text-white">Engajamento Pedagógico</h3>
+                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Alunos Ativos vs Missões Enviadas</p>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-black text-neon-blue">
+                  {counts.users.aluno > 0 ? Math.round((counts.users.active / counts.users.aluno) * 100) : 0}%
+                </p>
+                <p className="text-[9px] text-gray-500 font-black uppercase tracking-widest">Taxa de Ativação</p>
+              </div>
+            </div>
+
+            <div className="h-[200px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={[
+                    { name: 'Total Alunos', value: counts.users.aluno, color: '#4b5563' },
+                    { name: 'Alunos Ativos', value: counts.users.active, color: '#00f2ff' },
+                    { name: 'Missões Enviadas', value: counts.missions.total, color: '#ff6321' }
+                  ]}
+                  margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
+                  <XAxis 
+                    dataKey="name" 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fill: '#9ca3af', fontSize: 10, fontWeight: 'bold' }}
+                  />
+                  <YAxis 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fill: '#9ca3af', fontSize: 10, fontWeight: 'bold' }}
+                  />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '8px' }}
+                    itemStyle={{ fontSize: '12px', fontWeight: 'bold' }}
+                  />
+                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                    {[
+                      { name: 'Total Alunos', value: counts.users.aluno, color: '#4b5563' },
+                      { name: 'Alunos Ativos', value: counts.users.active, color: '#00f2ff' },
+                      { name: 'Missões Enviadas', value: counts.missions.total, color: '#ff6321' }
+                    ].map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="glass-card overflow-hidden">
           <div className="p-6 border-b border-white/5 bg-white/5 space-y-6">
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
               <h3 className="text-sm font-black uppercase tracking-widest text-gray-400">Navegação de Atividades</h3>
@@ -1256,6 +1459,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                   <th className="px-6 py-4">Status</th>
                   <th className="px-6 py-4">XP</th>
                   <th className="px-6 py-4">Unidade</th>
+                  <th className="px-6 py-4 text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
@@ -1293,6 +1497,15 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                         {franquias.find(f => f.id === mission.franquiaId)?.nome || "N/A"}
                       </p>
                     </td>
+                    <td className="px-6 py-4 text-right">
+                      <button 
+                        onClick={() => setSelectedMissionForView(mission)}
+                        className="p-2 rounded-lg bg-white/5 hover:bg-neon-blue hover:text-black transition-all border border-white/10"
+                        title="Visualizar Missão"
+                      >
+                        <Search className="w-4 h-4" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {filteredMissions.length === 0 && (
@@ -1319,7 +1532,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             </div>
           )}
         </div>
-      )}
+      </div>
+    )}
 
       {/* Modals */}
       <AnimatePresence>
@@ -1440,6 +1654,101 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                   className="flex-1 bg-neon-blue text-black font-black py-4 rounded-xl transition-all neon-glow-blue disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
                 >
                   {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "INICIAR IMPORTAÇÃO"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {selectedMissionForView && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="glass-card w-full max-w-2xl p-8 space-y-6 relative border-neon-blue/30"
+            >
+              <button 
+                onClick={() => setSelectedMissionForView(null)} 
+                className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-2xl font-black tracking-tighter flex items-center gap-3">
+                    <Eye className="text-neon-blue w-6 h-6" /> DETALHES DA <span className="text-mult-orange">MISSÃO</span>
+                  </h2>
+                  <span className={cn(
+                    "text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border",
+                    selectedMissionForView.status === "approved" ? "bg-green-500/10 text-green-400 border-green-500/20" :
+                    selectedMissionForView.status === "pending" ? "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" :
+                    selectedMissionForView.status === "bonus" ? "bg-purple-500/10 text-purple-400 border-purple-500/20" :
+                    "bg-red-500/10 text-red-400 border-red-500/20"
+                  )}>
+                    {selectedMissionForView.status === "approved" ? "Aprovado" : 
+                     selectedMissionForView.status === "pending" ? "Pendente" : 
+                     selectedMissionForView.status === "bonus" ? "Bônus" : "Rejeitado"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-4 text-[10px] text-gray-500 font-bold uppercase tracking-widest">
+                  <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {selectedMissionForView.studentName}</span>
+                  <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {new Date(selectedMissionForView.createdAt).toLocaleDateString("pt-BR")}</span>
+                  <span className="flex items-center gap-1"><Target className="w-3 h-3" /> {getRelativeLesson(selectedMissionForView.classNum).label}</span>
+                </div>
+              </div>
+
+              <div className="bg-black/40 border border-white/10 rounded-xl p-6 min-h-[200px] max-h-[400px] overflow-y-auto">
+                <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">
+                  {selectedMissionForView.content || "Nenhum conteúdo enviado."}
+                </p>
+              </div>
+
+              {selectedMissionForView.aiFeedback && (
+                <div className="bg-neon-blue/5 border border-neon-blue/20 rounded-xl p-4 space-y-2">
+                  <p className="text-[10px] font-black text-neon-blue uppercase tracking-widest flex items-center gap-2">
+                    <Rocket className="w-3 h-3" /> Feedback da IA:
+                  </p>
+                  <p className="text-xs text-gray-400 italic">
+                    {selectedMissionForView.aiFeedback}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-4 border-t border-white/5">
+                <div className="flex gap-2 w-full sm:w-auto">
+                  {selectedMissionForView.status === "pending" && (
+                    <>
+                      <button 
+                        onClick={() => handleApproveMission(selectedMissionForView, false)}
+                        disabled={loading}
+                        className="flex-1 sm:flex-none bg-green-500/20 hover:bg-green-500/30 text-green-400 border border-green-500/30 font-bold py-2 px-4 rounded-xl transition-all flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest disabled:opacity-50"
+                      >
+                        <CheckCircle className="w-4 h-4" /> Aprovar
+                      </button>
+                      <button 
+                        onClick={() => handleApproveMission(selectedMissionForView, true)}
+                        disabled={loading}
+                        className="flex-1 sm:flex-none bg-mult-orange/20 hover:bg-mult-orange/30 text-mult-orange border border-mult-orange/30 font-bold py-2 px-4 rounded-xl transition-all flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest disabled:opacity-50 neon-glow-orange"
+                      >
+                        <Zap className="w-4 h-4" /> Bônus
+                      </button>
+                      <button 
+                        onClick={() => handleRejectMission(selectedMissionForView)}
+                        disabled={loading}
+                        className="flex-1 sm:flex-none bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 font-bold py-2 px-4 rounded-xl transition-all flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest disabled:opacity-50"
+                      >
+                        <XCircle className="w-4 h-4" /> Rejeitar
+                      </button>
+                    </>
+                  )}
+                </div>
+                <button 
+                  onClick={() => setSelectedMissionForView(null)}
+                  className="w-full sm:w-auto px-8 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white font-black uppercase tracking-widest text-[10px] border border-white/10 transition-all"
+                >
+                  FECHAR
                 </button>
               </div>
             </motion.div>

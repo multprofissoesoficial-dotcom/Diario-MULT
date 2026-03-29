@@ -16,7 +16,7 @@ import {
   serverTimestamp
 } from "firebase/firestore";
 import { db } from "../firebase";
-import { UserProfile, JobPosting, Application, SkillTag, Company, ApplicationStatus, Franquia } from "../types";
+import { UserProfile, JobPosting, Application, SkillTag, Company, ApplicationStatus, Franquia, JobStatus, SelectionProcessType } from "../types";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Briefcase, 
@@ -38,7 +38,10 @@ import {
   History,
   Printer,
   ChevronDown,
-  Download
+  Download,
+  Edit3,
+  Calendar,
+  Target
 } from "lucide-react";
 import { cn, handleFirestoreError, OperationType } from "../lib/utils";
 
@@ -86,8 +89,13 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
     companyId: "",
     description: "",
     requiredSkills: [] as SkillTag[],
-    status: "aberta" as "aberta" | "fechada"
+    status: "aberta" as JobStatus,
+    openingDate: "",
+    closingForecast: "",
+    selectionProcessType: "Entrevista Presencial" as SelectionProcessType
   });
+
+  const [editingJob, setEditingJob] = useState<JobPosting | null>(null);
 
   // New Company Form State
   const [newCompany, setNewCompany] = useState({
@@ -166,7 +174,16 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
         createdByUid: profile.uid
       });
       setShowAddJob(false);
-      setNewJob({ title: "", companyId: "", description: "", requiredSkills: [], status: "aberta" });
+      setNewJob({ 
+        title: "", 
+        companyId: "", 
+        description: "", 
+        requiredSkills: [], 
+        status: "aberta",
+        openingDate: "",
+        closingForecast: "",
+        selectionProcessType: "Entrevista Presencial"
+      });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, "job_postings");
     } finally {
@@ -320,13 +337,29 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
-  const toggleJobStatus = async (job: JobPosting) => {
-    const newStatus = job.status === "aberta" ? "fechada" : "aberta";
+  const handleUpdateJob = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingJob) return;
+
+    setLoading(true);
     try {
-      await updateDoc(doc(db, "job_postings", job.id), { status: newStatus });
+      const company = companies.find(c => c.id === editingJob.companyId);
+      const { id, ...jobData } = editingJob;
+      await updateDoc(doc(db, "job_postings", id), {
+        ...jobData,
+        companyName: company?.name || editingJob.companyName
+      });
+      setEditingJob(null);
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `job_postings/${job.id}`);
+      handleFirestoreError(err, OperationType.WRITE, `job_postings/${editingJob.id}`);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const toggleJobStatus = async (job: JobPosting) => {
+    // This is now handled by the Kanban or Edit Job modal
+    setEditingJob(job);
   };
 
   const viewCandidates = async (job: JobPosting) => {
@@ -358,62 +391,94 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
   return (
     <>
       <div className="space-y-8 print:hidden">
-        {/* Metrics Dashboard */}
-      {!selectedJob && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="glass-card p-6 border-white/10 relative overflow-hidden group">
-            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-              <Briefcase className="w-12 h-12 text-neon-blue" />
-            </div>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Vagas Abertas</p>
-            <h3 className="text-3xl font-black text-white tracking-tighter">
-              {jobs.filter(j => j.status === "aberta").length}
-            </h3>
-            <div className="mt-2 flex items-center gap-1 text-[10px] text-neon-blue font-bold uppercase">
-              <TrendingUp className="w-3 h-3" /> Em captação
-            </div>
-          </div>
+        {/* Metrics Dashboard - Context Aware */}
+        {!selectedJob && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {activeSubTab === 'vagas' ? (
+              <>
+                <div className="glass-card p-6 border-white/10 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <Briefcase className="w-12 h-12 text-neon-blue" />
+                  </div>
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Vagas Abertas</p>
+                  <h3 className="text-3xl font-black text-white tracking-tighter">
+                    {jobs.filter(j => j.status === "aberta").length}
+                  </h3>
+                  <div className="mt-2 flex items-center gap-1 text-[10px] text-neon-blue font-bold uppercase">
+                    <TrendingUp className="w-3 h-3" /> Em captação
+                  </div>
+                </div>
 
-          <div className="glass-card p-6 border-white/10 relative overflow-hidden group">
-            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-              <Users className="w-12 h-12 text-mult-orange" />
-            </div>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Total Candidaturas</p>
-            <h3 className="text-3xl font-black text-white tracking-tighter">
-              {allApplications.length}
-            </h3>
-            <div className="mt-2 flex items-center gap-1 text-[10px] text-mult-orange font-bold uppercase">
-              <Users className="w-3 h-3" /> Inscritos
-            </div>
-          </div>
+                <div className="glass-card p-6 border-white/10 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <Users className="w-12 h-12 text-mult-orange" />
+                  </div>
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Total Candidaturas</p>
+                  <h3 className="text-3xl font-black text-white tracking-tighter">
+                    {allApplications.length}
+                  </h3>
+                  <div className="mt-2 flex items-center gap-1 text-[10px] text-mult-orange font-bold uppercase">
+                    <Users className="w-3 h-3" /> Inscritos
+                  </div>
+                </div>
 
-          <div className="glass-card p-6 border-white/10 relative overflow-hidden group">
-            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-              <CheckCircle2 className="w-12 h-12 text-green-500" />
-            </div>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Encaminhados</p>
-            <h3 className="text-3xl font-black text-white tracking-tighter">
-              {allApplications.filter(a => a.status === "encaminhado").length}
-            </h3>
-            <div className="mt-2 flex items-center gap-1 text-[10px] text-green-500 font-bold uppercase">
-              <UserCheck className="w-3 h-3" /> Em entrevista
-            </div>
-          </div>
+                <div className="glass-card p-6 border-white/10 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <CheckCircle2 className="w-12 h-12 text-green-500" />
+                  </div>
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Encaminhados</p>
+                  <h3 className="text-3xl font-black text-white tracking-tighter">
+                    {allApplications.filter(a => a.status === "encaminhado").length}
+                  </h3>
+                  <div className="mt-2 flex items-center gap-1 text-[10px] text-green-500 font-bold uppercase">
+                    <UserCheck className="w-3 h-3" /> Em entrevista
+                  </div>
+                </div>
 
-          <div className="glass-card p-6 border-white/10 relative overflow-hidden group">
-            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-              <Trophy className="w-12 h-12 text-yellow-500" />
-            </div>
-            <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Contratados</p>
-            <h3 className="text-3xl font-black text-white tracking-tighter">
-              {allApplications.filter(a => a.status === "contratado").length}
-            </h3>
-            <div className="mt-2 flex items-center gap-1 text-[10px] text-yellow-500 font-bold uppercase">
-              <CheckCircle2 className="w-3 h-3" /> Sucesso
-            </div>
+                <div className="glass-card p-6 border-white/10 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <Trophy className="w-12 h-12 text-yellow-500" />
+                  </div>
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Contratados</p>
+                  <h3 className="text-3xl font-black text-white tracking-tighter">
+                    {allApplications.filter(a => a.status === "contratado").length}
+                  </h3>
+                  <div className="mt-2 flex items-center gap-1 text-[10px] text-yellow-500 font-bold uppercase">
+                    <CheckCircle2 className="w-3 h-3" /> Sucesso
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="glass-card p-6 border-white/10 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <Building2 className="w-12 h-12 text-neon-blue" />
+                  </div>
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Empresas Parceiras</p>
+                  <h3 className="text-3xl font-black text-white tracking-tighter">
+                    {companies.length}
+                  </h3>
+                  <div className="mt-2 flex items-center gap-1 text-[10px] text-neon-blue font-bold uppercase">
+                    <Building2 className="w-3 h-3" /> Ativas
+                  </div>
+                </div>
+
+                <div className="glass-card p-6 border-white/10 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <Briefcase className="w-12 h-12 text-mult-orange" />
+                  </div>
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Total de Vagas</p>
+                  <h3 className="text-3xl font-black text-white tracking-tighter">
+                    {jobs.length}
+                  </h3>
+                  <div className="mt-2 flex items-center gap-1 text-[10px] text-mult-orange font-bold uppercase">
+                    <Briefcase className="w-3 h-3" /> Cadastradas
+                  </div>
+                </div>
+              </>
+            )}
           </div>
-        </div>
-      )}
+        )}
 
       {selectedJob ? (
         <motion.div 
@@ -441,7 +506,7 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
               </h3>
             </div>
             
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto hidden md:block">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-white/5 border-b border-white/5">
@@ -555,6 +620,91 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
                 </tbody>
               </table>
             </div>
+
+            {/* Mobile Candidate List */}
+            <div className="md:hidden divide-y divide-white/5">
+              {loadingCandidates ? (
+                <div className="p-12 text-center text-gray-500 italic">Carregando candidatos...</div>
+              ) : applications.length > 0 ? (
+                applications.map((app, index) => (
+                  <div key={app.id} className="p-4 space-y-4">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "w-8 h-8 rounded-lg flex items-center justify-center font-black text-xs",
+                          index === 0 ? "bg-yellow-500/20 text-yellow-500 neon-glow-yellow" : 
+                          index === 1 ? "bg-gray-400/20 text-gray-400" :
+                          index === 2 ? "bg-orange-800/20 text-orange-800" : "bg-white/5 text-gray-500"
+                        )}>
+                          {index + 1}º
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-white">{app.student?.displayName || "N/A"}</p>
+                          <p className="text-[10px] text-gray-500 uppercase tracking-widest">{app.student?.turma || "Sem Turma"}</p>
+                        </div>
+                      </div>
+                      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-neon-blue/10 border border-neon-blue/20">
+                        <Trophy className="w-3 h-3 text-neon-blue" />
+                        <span className="text-xs font-black text-neon-blue">{app.matchScore}%</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex-1">
+                        <select 
+                          value={app.status || "pendente"}
+                          onChange={(e) => updateApplicationStatus(app.id, e.target.value as ApplicationStatus)}
+                          className={cn(
+                            "w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-[10px] font-black uppercase tracking-widest focus:outline-none transition-all",
+                            app.status === "contratado" ? "text-yellow-500 border-yellow-500/30" :
+                            app.status === "encaminhado" ? "text-green-500 border-green-500/30" :
+                            app.status === "rejeitado" ? "text-red-500 border-red-500/30" : 
+                            (app.status === "faltou" || app.status === "desistiu") ? "text-orange-500 border-orange-500/30" : "text-gray-400"
+                          )}
+                        >
+                          <option value="pendente">Pendente</option>
+                          <option value="encaminhado">Encaminhado</option>
+                          <option value="contratado">Contratado</option>
+                          <option value="rejeitado">Rejeitado</option>
+                          <option value="faltou">Faltou (Regra 1ª)</option>
+                          <option value="desistiu">Desistiu (Regra 2ª)</option>
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => setSelectedCandidate(app)}
+                          className="p-3 rounded-lg bg-white/5 hover:bg-mult-orange text-white transition-all border border-white/10"
+                        >
+                          <MessageSquare className="w-4 h-4" />
+                        </button>
+                        {app.student?.resumeUrl && (
+                          <a 
+                            href={app.student.resumeUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-3 rounded-lg bg-white/5 hover:bg-neon-blue text-white hover:text-black transition-all border border-white/10"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    {app.student?.availabilityStatus && (
+                      <span className={cn(
+                        "text-[8px] font-bold uppercase tracking-tighter px-1.5 py-0.5 rounded w-fit block",
+                        app.student.availabilityStatus === 'Bloqueado' ? "bg-red-500/20 text-red-500" :
+                        app.student.availabilityStatus === 'Empregado' ? "bg-yellow-500/20 text-yellow-500" :
+                        app.student.availabilityStatus === 'Em Processo Selecionado' ? "bg-neon-blue/20 text-neon-blue" : "bg-green-500/20 text-green-500"
+                      )}>
+                        {app.student.availabilityStatus}
+                      </span>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <div className="p-12 text-center text-gray-500 italic">Nenhum candidato inscrito nesta vaga.</div>
+              )}
+            </div>
           </div>
         </motion.div>
       ) : (
@@ -582,10 +732,10 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
           </div>
 
           {activeSubTab === "vagas" ? (
-            <div className="space-y-6">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="space-y-6 overflow-x-auto pb-4 custom-scrollbar">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
                 <h2 className="text-xl font-black tracking-tighter uppercase flex items-center gap-2">
-                  <Briefcase className="text-mult-orange w-6 h-6" /> Gestão de Vagas
+                  <Briefcase className="text-mult-orange w-6 h-6" /> Pipeline de Vagas
                 </h2>
                 <button 
                   onClick={() => setShowAddJob(true)}
@@ -595,68 +745,71 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {jobs.map(job => (
-                  <motion.div 
-                    key={job.id}
-                    layout
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="glass-card p-6 flex flex-col justify-between border-white/10 hover:border-mult-orange/30 transition-all group"
-                  >
-                    <div>
-                      <div className="flex justify-between items-start mb-4">
-                        <div className={cn(
-                          "px-2 py-1 rounded text-[8px] font-black uppercase tracking-widest border",
-                          job.status === "aberta" ? "bg-green-500/10 text-green-500 border-green-500/20" : "bg-red-500/10 text-red-500 border-red-500/20"
-                        )}>
-                          {job.status}
-                        </div>
-                        <button 
-                          onClick={() => toggleJobStatus(job)}
-                          className="text-[10px] font-black text-gray-500 hover:text-white uppercase tracking-widest transition-colors"
-                        >
-                          {job.status === "aberta" ? "Fechar" : "Abrir"}
-                        </button>
-                      </div>
-                      <h4 className="text-lg font-black tracking-tighter text-white uppercase mb-1">{job.title}</h4>
-                      <div className="flex items-center justify-between mb-4">
-                        <p className="text-xs font-bold text-mult-orange uppercase tracking-widest">{job.companyName}</p>
-                        {profile.role === "master" && (
-                          <span className="text-[8px] font-black text-neon-blue uppercase tracking-widest bg-neon-blue/10 px-1.5 py-0.5 rounded border border-neon-blue/20">
-                            {franquias.find(f => f.id === job.franquiaId)?.nome || "Global"}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-400 mb-6 line-clamp-2 italic">"{job.description}"</p>
-                      
-                      <div className="flex flex-wrap gap-1 mb-6">
-                        {job.requiredSkills.slice(0, 3).map(skill => (
-                          <span key={skill} className="text-[8px] font-black px-2 py-0.5 rounded bg-white/5 text-gray-500 border border-white/10 uppercase tracking-widest">
-                            {skill}
-                          </span>
-                        ))}
-                        {job.requiredSkills.length > 3 && (
-                          <span className="text-[8px] font-black px-2 py-0.5 rounded bg-white/5 text-gray-500 border border-white/10 uppercase tracking-widest">
-                            +{job.requiredSkills.length - 3}
-                          </span>
-                        )}
-                      </div>
+              <div className="flex flex-col lg:flex-row gap-6">
+                {[
+                  { id: 'captacao', title: 'Vagas em Captação', color: 'text-neon-blue', bg: 'bg-neon-blue/5' },
+                  { id: 'aberta', title: 'Vagas Abertas', color: 'text-green-500', bg: 'bg-green-500/5' },
+                  { id: 'encaminhado', title: 'Alunos Encaminhados', color: 'text-mult-orange', bg: 'bg-mult-orange/5' },
+                  { id: 'encerrada', title: 'Vagas Preenchidas/Encerradas', color: 'text-gray-500', bg: 'bg-white/5' }
+                ].map(column => (
+                  <div key={column.id} className={cn("flex-1 rounded-2xl p-4 border border-white/5", column.bg)}>
+                    <div className="flex items-center justify-between mb-4 px-2">
+                      <h3 className={cn("text-[10px] font-black uppercase tracking-widest", column.color)}>
+                        {column.title}
+                      </h3>
+                      <span className="text-[10px] font-black text-gray-500 bg-white/5 px-2 py-0.5 rounded-full">
+                        {jobs.filter(j => j.status === column.id).length}
+                      </span>
                     </div>
 
-                    <button 
-                      onClick={() => viewCandidates(job)}
-                      className="w-full py-3 rounded-xl bg-white/5 hover:bg-neon-blue text-white hover:text-black font-black uppercase tracking-widest text-[10px] transition-all border border-white/10 flex items-center justify-center gap-2"
-                    >
-                      <Users className="w-4 h-4" /> Ver Candidatos
-                    </button>
-                  </motion.div>
-                ))}
-                {jobs.length === 0 && (
-                  <div className="lg:col-span-3 glass-card p-12 text-center">
-                    <p className="text-gray-500 italic">Nenhuma vaga cadastrada. Clique em "Nova Vaga" para começar.</p>
+                    <div className="space-y-4">
+                      {jobs.filter(j => j.status === column.id).map(job => (
+                        <motion.div 
+                          key={job.id}
+                          layout
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="glass-card p-4 border-white/10 hover:border-mult-orange/30 transition-all group relative"
+                        >
+                          <div className="flex justify-between items-start mb-2">
+                            <h4 className="text-sm font-black tracking-tight text-white uppercase group-hover:text-mult-orange transition-colors">{job.title}</h4>
+                            <button 
+                              onClick={() => setEditingJob(job)}
+                              className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-500 hover:text-white transition-all"
+                            >
+                              <Edit3 className="w-3 h-3" />
+                            </button>
+                          </div>
+                          
+                          <p className="text-[10px] font-bold text-mult-orange uppercase tracking-widest mb-3">{job.companyName}</p>
+                          
+                          <div className="flex flex-col gap-2 mb-4">
+                            <div className="flex items-center gap-2 text-[9px] text-gray-500 font-bold uppercase tracking-widest">
+                              <Calendar className="w-3 h-3" />
+                              Previsão: {job.closingForecast ? new Date(job.closingForecast).toLocaleDateString('pt-BR') : 'N/A'}
+                            </div>
+                            <div className="flex items-center gap-2 text-[9px] text-gray-500 font-bold uppercase tracking-widest">
+                              <Target className="w-3 h-3" />
+                              {job.selectionProcessType || 'Presencial'}
+                            </div>
+                          </div>
+
+                          <button 
+                            onClick={() => viewCandidates(job)}
+                            className="w-full py-2 rounded-lg bg-white/5 hover:bg-neon-blue text-white hover:text-black font-black uppercase tracking-widest text-[9px] transition-all border border-white/10 flex items-center justify-center gap-2"
+                          >
+                            <Users className="w-3 h-3" /> Candidatos
+                          </button>
+                        </motion.div>
+                      ))}
+                      {jobs.filter(j => j.status === column.id).length === 0 && (
+                        <div className="py-8 text-center border-2 border-dashed border-white/5 rounded-xl">
+                          <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">Vazio</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
+                ))}
               </div>
             </div>
           ) : (
@@ -673,53 +826,34 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
                 </button>
               </div>
 
-              <div className="glass-card overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-white/5 border-b border-white/5">
-                        <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-500">Empresa</th>
-                        <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-500">Contato</th>
-                        <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-500">Telefone</th>
-                        {profile.role === "master" && <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-500">Unidade</th>}
-                        <th className="p-4 text-[10px] font-black uppercase tracking-widest text-gray-500 text-right">Cadastrada em</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/5">
-                      {companies.length > 0 ? (
-                        companies.map(company => (
-                          <tr key={company.id} className="hover:bg-white/5 transition-colors">
-                            <td className="p-4">
-                              <p className="text-sm font-bold text-white uppercase tracking-tight">{company.name}</p>
-                            </td>
-                            <td className="p-4">
-                              <p className="text-xs text-gray-400">{company.contactPerson}</p>
-                            </td>
-                            <td className="p-4">
-                              <p className="text-xs text-gray-400">{company.phone}</p>
-                            </td>
-                            {profile.role === "master" && (
-                              <td className="p-4">
-                                <span className="text-[10px] font-black text-neon-blue uppercase tracking-widest bg-neon-blue/10 px-2 py-1 rounded border border-neon-blue/20">
-                                  {franquias.find(f => f.id === company.franquiaId)?.nome || "Global"}
-                                </span>
-                              </td>
-                            )}
-                            <td className="p-4 text-right">
-                              <p className="text-[10px] text-gray-500 uppercase font-bold">
-                                {new Date(company.createdAt).toLocaleDateString('pt-BR')}
-                              </p>
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={4} className="p-12 text-center text-gray-500 italic">Nenhuma empresa cadastrada.</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {companies.map(company => (
+                  <div key={company.id} className="glass-card p-6 border-white/10 hover:border-neon-blue/30 transition-all group">
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="w-12 h-12 rounded-xl bg-neon-blue/10 flex items-center justify-center text-neon-blue border border-neon-blue/20">
+                        <Building2 className="w-6 h-6" />
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Vagas Ativas</p>
+                        <p className="text-2xl font-black text-white tracking-tighter">
+                          {jobs.filter(j => j.companyId === company.id && j.status === 'aberta').length}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <h3 className="text-lg font-black text-white uppercase tracking-tight mb-1">{company.name}</h3>
+                    <p className="text-xs text-gray-400 mb-4">{company.contactPerson}</p>
+                    
+                    <div className="space-y-2 pt-4 border-t border-white/5">
+                      <div className="flex items-center gap-2 text-[10px] text-gray-500 font-bold uppercase tracking-widest">
+                        <Phone className="w-3 h-3" /> {company.phone}
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px] text-gray-500 font-bold uppercase tracking-widest">
+                        <Calendar className="w-3 h-3" /> Desde {new Date(company.createdAt).toLocaleDateString('pt-BR')}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -772,6 +906,40 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Data de Abertura</label>
+                    <input 
+                      type="date"
+                      value={newJob.openingDate}
+                      onChange={(e) => setNewJob({...newJob, openingDate: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 focus:outline-none focus:border-mult-orange text-white text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Previsão de Fechamento</label>
+                    <input 
+                      type="date"
+                      value={newJob.closingForecast}
+                      onChange={(e) => setNewJob({...newJob, closingForecast: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 focus:outline-none focus:border-mult-orange text-white text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Tipo de Processo</label>
+                    <select 
+                      value={newJob.selectionProcessType}
+                      onChange={(e) => setNewJob({...newJob, selectionProcessType: e.target.value as SelectionProcessType})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 focus:outline-none focus:border-mult-orange text-white text-sm"
+                    >
+                      <option value="Entrevista Presencial">Entrevista Presencial</option>
+                      <option value="Entrega de Currículo">Entrega de Currículo</option>
+                      <option value="Atendimento Online">Atendimento Online</option>
+                      <option value="Teste Técnico">Teste Técnico</option>
+                    </select>
+                  </div>
+                </div>
+
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Descrição da Vaga</label>
                   <textarea 
@@ -820,6 +988,140 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
                     className="px-8 py-3 rounded-xl bg-mult-orange text-white font-black uppercase tracking-widest text-[10px] transition-all neon-glow-orange disabled:opacity-50"
                   >
                     {loading ? "CRIANDO..." : "CRIAR VAGA"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit Job Modal */}
+      <AnimatePresence>
+        {editingJob && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="glass-card w-full max-w-2xl overflow-hidden"
+            >
+              <div className="p-6 border-b border-white/5 bg-white/5 flex justify-between items-center">
+                <h3 className="text-lg font-black uppercase tracking-widest text-white">Editar Vaga</h3>
+                <button onClick={() => setEditingJob(null)} className="text-gray-500 hover:text-white">
+                  <XCircle className="w-6 h-6" />
+                </button>
+              </div>
+
+              <form onSubmit={handleUpdateJob} className="p-8 space-y-6 max-h-[80vh] overflow-y-auto custom-scrollbar">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Título da Vaga</label>
+                    <input 
+                      required
+                      type="text"
+                      value={editingJob.title}
+                      onChange={(e) => setEditingJob({...editingJob, title: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 focus:outline-none focus:border-mult-orange text-white text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Status da Vaga</label>
+                    <select 
+                      required
+                      value={editingJob.status}
+                      onChange={(e) => setEditingJob({...editingJob, status: e.target.value as JobStatus})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 focus:outline-none focus:border-mult-orange text-white text-sm"
+                    >
+                      <option value="captacao">Em Captação</option>
+                      <option value="aberta">Aberta</option>
+                      <option value="encaminhado">Alunos Encaminhados</option>
+                      <option value="encerrada">Preenchida/Encerrada</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Data de Abertura</label>
+                    <input 
+                      type="date"
+                      value={editingJob.openingDate}
+                      onChange={(e) => setEditingJob({...editingJob, openingDate: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 focus:outline-none focus:border-mult-orange text-white text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Previsão de Fechamento</label>
+                    <input 
+                      type="date"
+                      value={editingJob.closingForecast}
+                      onChange={(e) => setEditingJob({...editingJob, closingForecast: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 focus:outline-none focus:border-mult-orange text-white text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Tipo de Processo</label>
+                    <select 
+                      value={editingJob.selectionProcessType}
+                      onChange={(e) => setEditingJob({...editingJob, selectionProcessType: e.target.value as SelectionProcessType})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 focus:outline-none focus:border-mult-orange text-white text-sm"
+                    >
+                      <option value="Entrevista Presencial">Entrevista Presencial</option>
+                      <option value="Entrega de Currículo">Entrega de Currículo</option>
+                      <option value="Atendimento Online">Atendimento Online</option>
+                      <option value="Teste Técnico">Teste Técnico</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Descrição da Vaga</label>
+                  <textarea 
+                    required
+                    value={editingJob.description}
+                    onChange={(e) => setEditingJob({...editingJob, description: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-3 h-32 focus:outline-none focus:border-mult-orange text-white text-sm resize-none"
+                  />
+                </div>
+
+                <div className="space-y-4">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Habilidades Exigidas</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">
+                    {SKILLS.map(skill => (
+                      <label key={skill} className="flex items-center gap-3 p-2 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
+                        <input 
+                          type="checkbox"
+                          checked={editingJob.requiredSkills.includes(skill)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setEditingJob({...editingJob, requiredSkills: [...editingJob.requiredSkills, skill]});
+                            } else {
+                              setEditingJob({...editingJob, requiredSkills: editingJob.requiredSkills.filter(s => s !== skill)});
+                            }
+                          }}
+                          className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-mult-orange focus:ring-mult-orange"
+                        />
+                        <span className="text-[10px] text-gray-300 uppercase tracking-widest">{skill}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-4 pt-4">
+                  <button 
+                    type="button"
+                    onClick={() => setEditingJob(null)}
+                    className="px-6 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-black uppercase tracking-widest text-[10px] transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit"
+                    disabled={loading}
+                    className="px-8 py-3 rounded-xl bg-mult-orange text-white font-black uppercase tracking-widest text-[10px] transition-all neon-glow-orange disabled:opacity-50"
+                  >
+                    {loading ? "SALVANDO..." : "SALVAR ALTERAÇÕES"}
                   </button>
                 </div>
               </form>
