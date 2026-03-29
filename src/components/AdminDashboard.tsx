@@ -830,8 +830,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       </div>
 
       {/* Stats & Controls */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
-        <div className="lg:col-span-5 glass-card p-5 sm:p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+      <div className="flex flex-col gap-6">
+        <div className="glass-card p-5 sm:p-6 flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6 w-full md:w-auto">
             <div className="flex items-center gap-3 shrink-0">
               <Filter className="w-4 h-4 text-gray-500" />
@@ -885,7 +885,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         </div>
 
         {activeTab === "users" ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+          <div className="flex flex-col gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
             <button 
               onClick={() => { setRoleFilter("aluno"); setPendingOnly(false); }}
               className={cn(
@@ -966,8 +967,10 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
               </div>
             </button>
           </div>
-        ) : activeTab === "activities" ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+        </div>
+      ) : activeTab === "activities" ? (
+          <div className="flex flex-col gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
             <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
               <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue border border-neon-blue/20">
                 <FileText className="w-5 h-5 sm:w-6 sm:h-6" />
@@ -1036,9 +1039,11 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
               </div>
             </div>
           </div>
-        ) : activeTab === "ats" ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
+        </div>
+      ) : activeTab === "ats" ? (
+          <div className="flex flex-col gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
               <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue border border-neon-blue/20">
                 <Briefcase className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
@@ -1075,7 +1080,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
               </div>
             </div>
           </div>
-        ) : null}
+        </div>
+      ) : null}
 
       </div>
 
