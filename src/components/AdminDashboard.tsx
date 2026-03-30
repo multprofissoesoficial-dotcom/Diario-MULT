@@ -108,6 +108,9 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [maintenanceReport, setMaintenanceReport] = useState<any>(null);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
   const [showMaintenanceConfirm, setShowMaintenanceConfirm] = useState(false);
+  const [cleanupReport, setCleanupReport] = useState<any>(null);
+  const [cleanupLoading, setCleanupLoading] = useState(false);
+  const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
   const [allMissions, setAllMissions] = useState<Mission[]>([]);
   const [lastMissionDoc, setLastMissionDoc] = useState<any>(null);
   const [hasMoreMissions, setHasMoreMissions] = useState(true);
@@ -821,6 +824,36 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
+  const handleRunCleanupLegacy = async () => {
+    setCleanupLoading(true);
+    setCleanupReport(null);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const response = await fetch("/api/maintenance/cleanup-legacy", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao executar limpeza de legados");
+      }
+
+      const result = await response.json();
+      setCleanupReport(result.report);
+      setShowCleanupConfirm(false);
+      fetchCounts(); // Refresh counts after cleanup
+    } catch (err: any) {
+      console.error("Erro na limpeza de legados:", err);
+      alert("Erro na limpeza de legados: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setCleanupLoading(false);
+    }
+  };
+
   const handleCreateFranquia = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -1262,6 +1295,85 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                 <div className="p-4 bg-black/40 rounded-xl border border-white/5">
                   <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">IDs Normalizados</p>
                   <p className="text-2xl font-black text-neon-blue">{maintenanceReport.normalized}</p>
+                </div>
+                <div className="p-4 bg-black/40 rounded-xl border border-white/5">
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Status</p>
+                  <p className="text-sm font-black text-green-400 uppercase tracking-widest">Concluído</p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          <div className="glass-card p-8 border-mult-orange/20 bg-mult-orange/5">
+            <div className="flex items-start gap-6">
+              <div className="w-16 h-16 rounded-2xl bg-mult-orange/20 flex items-center justify-center text-mult-orange shrink-0 border border-mult-orange/30">
+                <Trash2 className="w-8 h-8" />
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Limpeza de Rastros Legados</h2>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Remove documentos com IDs aleatórios que já possuem equivalentes oficiais. Esta ação irá:
+                  </p>
+                </div>
+                
+                <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {[
+                    "Identificar conflitos entre IDs aleatórios e IDs compostos",
+                    "Fundir progresso (missões) para o documento oficial",
+                    "Remover o rastro legado (ID aleatório) após a fusão",
+                    "Preparar o banco para o Índice Único de Franquia + Código"
+                  ].map((item, i) => (
+                    <li key={i} className="flex items-center gap-3 text-xs text-gray-300">
+                      <div className="w-1.5 h-1.5 rounded-full bg-mult-orange" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="pt-4 flex items-center gap-4">
+                  <button
+                    onClick={() => setShowCleanupConfirm(true)}
+                    disabled={cleanupLoading}
+                    className="bg-mult-orange hover:bg-mult-orange/80 text-black font-black py-4 px-8 rounded-xl transition-all neon-glow-orange text-xs uppercase tracking-widest flex items-center gap-3 disabled:opacity-50"
+                  >
+                    {cleanupLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-5 h-5" />
+                    )}
+                    Remover Rastros de Migração
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {cleanupReport && (
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="glass-card p-8 border-mult-orange/20 bg-mult-orange/5"
+            >
+              <div className="flex items-center gap-4 mb-6">
+                <div className="w-10 h-10 rounded-xl bg-mult-orange/20 flex items-center justify-center text-mult-orange border border-mult-orange/30">
+                  <CheckCircle className="w-6 h-6" />
+                </div>
+                <h3 className="text-lg font-black text-white uppercase tracking-tighter">Relatório de Limpeza</h3>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="p-4 bg-black/40 rounded-xl border border-white/5">
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Analisados</p>
+                  <p className="text-2xl font-black text-white">{cleanupReport.analyzed}</p>
+                </div>
+                <div className="p-4 bg-black/40 rounded-xl border border-white/5">
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Conflitos Resolvidos</p>
+                  <p className="text-2xl font-black text-mult-orange">{cleanupReport.conflictsResolved}</p>
+                </div>
+                <div className="p-4 bg-black/40 rounded-xl border border-white/5">
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Erros</p>
+                  <p className="text-2xl font-black text-red-400">{cleanupReport.errors}</p>
                 </div>
                 <div className="p-4 bg-black/40 rounded-xl border border-white/5">
                   <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Status</p>
@@ -1772,6 +1884,52 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                     className="w-full bg-white/5 hover:bg-white/10 text-gray-400 font-black py-4 rounded-xl transition-all text-xs uppercase tracking-widest"
                   >
                     Cancelar
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showCleanupConfirm && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="glass-card max-w-md w-full p-8 border-mult-orange/50"
+            >
+              <div className="flex flex-col items-center text-center space-y-6">
+                <div className="w-20 h-20 rounded-full bg-mult-orange/20 flex items-center justify-center text-mult-orange border-4 border-mult-orange/30 animate-pulse">
+                  <Trash2 className="w-10 h-10" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Limpeza de Legados</h3>
+                  <p className="text-gray-400 text-sm mt-2">
+                    Você está prestes a remover os rastros de migração (IDs aleatórios). Esta ação irá fundir o progresso para os documentos oficiais e deletar os antigos.
+                  </p>
+                </div>
+                
+                <div className="bg-mult-orange/10 border border-mult-orange/20 p-4 rounded-xl w-full">
+                  <p className="text-xs text-mult-orange font-bold">
+                    Esta ação é segura e atômica, mas irreversível para os documentos deletados.
+                  </p>
+                </div>
+
+                <div className="flex flex-col w-full gap-3">
+                  <button
+                    onClick={handleRunCleanupLegacy}
+                    disabled={cleanupLoading}
+                    className="w-full bg-mult-orange hover:bg-mult-orange/80 text-black font-black py-4 rounded-xl transition-all neon-glow-orange text-xs uppercase tracking-widest flex items-center justify-center gap-2"
+                  >
+                    {cleanupLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Sim, Limpar Legados"}
+                  </button>
+                  <button
+                    onClick={() => setShowCleanupConfirm(false)}
+                    disabled={cleanupLoading}
+                    className="w-full bg-white/5 hover:bg-white/10 text-white font-bold py-4 rounded-xl transition-all uppercase tracking-widest text-xs"
+                  >
+                    CANCELAR
                   </button>
                 </div>
               </div>
