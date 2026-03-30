@@ -25,7 +25,19 @@ service cloud.firestore {
     }
 
     function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+      return isAuthenticated() && (
+        request.auth.uid == userId || 
+        get(/databases/$(database)/documents/users/$(userId)).data.legacyUid == request.auth.uid ||
+        get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+      );
+    }
+
+    function isStudentOwner(studentId) {
+      return isAuthenticated() && (
+        request.auth.uid == studentId ||
+        get(/databases/$(database)/documents/users/$(studentId)).data.legacyUid == request.auth.uid ||
+        get(/databases/$(database)/documents/users/$(studentId)).data.uid == request.auth.uid
+      );
     }
 
     function isMaster() {
@@ -87,31 +99,28 @@ service cloud.firestore {
 
     // Usuários
     match /users/{userId} {
-      // Students can only GET their own document. They CANNOT LIST.
-      allow get: if isOwner(userId);
+      // Students can only GET their own document.
+      // We check if the doc ID is their UID OR if the legacyUid field matches their UID.
+      allow get: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        (resource != null && request.auth.uid == resource.data.legacyUid) ||
+        (resource != null && request.auth.uid == resource.data.uid)
+      );
       
-      // PCM can list and read any user in their franchise (or all if master/rh)
-      allow list: if isPCM();
+      // Allow students to query (list) their own document via uid or legacyUid
+      allow list: if isAuthenticated() && (
+        isPCM() || 
+        (resource.data.uid == request.auth.uid || resource.data.legacyUid == request.auth.uid)
+      );
+
+      // PCM can read any user in their franchise (or all if master/rh)
       allow get: if isPCM() && (
         getUserData().role in ['master', 'rh'] || 
         getUserData().franquiaId == resource.data.franquiaId
       );
 
-      // Create: Only master, coordinator (within franchise), or RH
-      allow create: if (isATSAdmin() || (
-        isAuthenticated() && getUserData().role == 'coordenador' && 
-        request.resource.data.franquiaId == getUserData().franquiaId &&
-        request.resource.data.role in ['professor', 'aluno']
-      )) && isValidUser(request.resource.data) && uidUnchanged();
-
-      // Update: Owner (limited fields), Master, RH, or PCM (within franchise)
-      allow update: if (
-        (isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.franquiaId == resource.data.franquiaId) || 
-        isATSAdmin() || 
-        (isPCM() && resource.data.franquiaId == getUserData().franquiaId && (request.resource.data.role == resource.data.role || isATSAdmin()))
-      ) && isValidUser(request.resource.data) && uidNotModified();
-
-      allow delete: if isMaster();
+      // Write and Delete: ONLY Master (as requested for security lockdown)
+      allow write, delete: if isMaster();
 
       // Enrollments sub-collection
       match /enrollments/{enrollmentId} {
@@ -136,8 +145,8 @@ service cloud.firestore {
 
     // Candidaturas (Applications)
     match /applications/{applicationId} {
-      allow read: if isATSAdmin() || (isAuthenticated() && resource.data.studentId == request.auth.uid);
-      allow create: if isAuthenticated() && request.resource.data.studentId == request.auth.uid;
+      allow read: if isATSAdmin() || (isAuthenticated() && isStudentOwner(resource.data.studentId));
+      allow create: if isAuthenticated() && isStudentOwner(request.resource.data.studentId);
       allow update, delete: if isATSAdmin();
     }
 
@@ -145,17 +154,17 @@ service cloud.firestore {
     match /missions/{missionId} {
       allow read: if isAuthenticated() && (
         isPCM() || 
-        resource.data.studentId == request.auth.uid
+        isStudentOwner(resource.data.studentId)
       );
       
       allow create: if (
         (isPCM() && request.resource.data.franquiaId == getUserData().franquiaId) || 
-        (isAuthenticated() && request.resource.data.studentId == request.auth.uid)
+        (isAuthenticated() && isStudentOwner(request.resource.data.studentId))
       ) && isValidMission(request.resource.data);
 
       allow update: if (
         (isPCM() && resource.data.franquiaId == getUserData().franquiaId) || 
-        (isAuthenticated() && resource.data.studentId == request.auth.uid && request.resource.data.status == resource.data.status)
+        (isAuthenticated() && isStudentOwner(resource.data.studentId) && request.resource.data.status == resource.data.status)
       ) && isValidMission(request.resource.data);
 
       allow delete: if isMaster();

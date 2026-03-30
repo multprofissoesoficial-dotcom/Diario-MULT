@@ -29,8 +29,8 @@ export async function POST(req: NextRequest) {
 async function handleCleanupLegacy() {
   const report = {
     analyzed: 0,
-    removed: 0,
-    migrated: 0,
+    loginsRecuperados: 0, // Migrated to official ID
+    duplicadosDeletados: 0, // Deleted because official already exists
     errors: [] as string[]
   };
 
@@ -38,10 +38,9 @@ async function handleCleanupLegacy() {
     const studentsSnap = await adminDb.collection("users").where("role", "==", "aluno").get();
     report.analyzed = studentsSnap.size;
 
-    // Identify legacy records (random UIDs)
-    // A random UID is usually 28 chars (Firebase Auth default) or at least doesn't contain an underscore if it's not the composite pattern
-    // However, the safest check is: does it match {franquiaId}_{codigo}?
-    
+    const deleteBatch = adminDb.batch();
+    let deleteCount = 0;
+
     for (const doc of studentsSnap.docs) {
       const data = doc.data();
       const currentId = doc.id;
@@ -62,13 +61,32 @@ async function handleCleanupLegacy() {
         const officialSnap = await officialRef.get();
 
         if (officialSnap.exists) {
-          // SE EXISTIR: Fundir e Deletar Aleatório
-          await mergeUserRecord(currentId, expectedId);
-          report.removed++;
+          // SE EXISTIR: Comparar progresso e fundir
+          const officialData = officialSnap.data();
+          
+          // Count missions for both
+          const legacyMissionsSnap = await adminDb.collection("missions").where("studentId", "==", currentId).count().get();
+          const officialMissionsSnap = await adminDb.collection("missions").where("studentId", "==", expectedId).count().get();
+          
+          const legacyCount = legacyMissionsSnap.data().count;
+          const officialCount = officialMissionsSnap.data().count;
+
+          if (legacyCount > officialCount) {
+            // Aleatório tem mais progresso, fundir no oficial
+            await mergeUserRecord(currentId, expectedId);
+          } else {
+            // Oficial está mais completo ou igual, apenas deletar aleatório
+            // Mas garantir que o legacyUid esteja no oficial para o login funcionar
+            if (!officialData?.legacyUid) {
+              await officialRef.update({ legacyUid: currentId });
+            }
+            await adminDb.collection("users").doc(currentId).delete();
+          }
+          report.duplicadosDeletados++;
         } else {
           // SE NÃO EXISTIR: Renomear (Mover)
           await moveUserRecord(currentId, expectedId, data);
-          report.migrated++;
+          report.loginsRecuperados++;
         }
       } catch (err: any) {
         console.error(`Error cleaning up legacy record ${currentId}:`, err);

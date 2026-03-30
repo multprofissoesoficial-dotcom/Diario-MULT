@@ -1365,19 +1365,19 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                 <div className="p-4 bg-black/40 rounded-xl border border-white/5">
                   <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Analisados</p>
-                  <p className="text-2xl font-black text-white">{cleanupReport.analyzed}</p>
+                  <p className="text-2xl font-black text-white">{cleanupReport.analyzed || 0}</p>
                 </div>
                 <div className="p-4 bg-black/40 rounded-xl border border-white/5">
-                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Conflitos Resolvidos</p>
-                  <p className="text-2xl font-black text-mult-orange">{cleanupReport.conflictsResolved}</p>
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Logins Recuperados</p>
+                  <p className="text-2xl font-black text-mult-orange">{cleanupReport.loginsRecuperados || 0}</p>
+                </div>
+                <div className="p-4 bg-black/40 rounded-xl border border-white/5">
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Duplicados Deletados</p>
+                  <p className="text-2xl font-black text-green-400">{cleanupReport.duplicadosDeletados || 0}</p>
                 </div>
                 <div className="p-4 bg-black/40 rounded-xl border border-white/5">
                   <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Erros</p>
-                  <p className="text-2xl font-black text-red-400">{cleanupReport.errors}</p>
-                </div>
-                <div className="p-4 bg-black/40 rounded-xl border border-white/5">
-                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Status</p>
-                  <p className="text-sm font-black text-green-400 uppercase tracking-widest">Concluído</p>
+                  <p className="text-2xl font-black text-red-400">{cleanupReport.errors?.length || 0}</p>
                 </div>
               </div>
             </motion.div>
