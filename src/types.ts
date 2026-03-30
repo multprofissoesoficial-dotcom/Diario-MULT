@@ -61,6 +61,37 @@ export interface UserProfile {
   perceptions?: Record<string, { rating: number; notes: string }>; // Keyed by franquiaId
   employmentHistory?: EmploymentHistoryEntry[];
   lastLogin?: any;
+  currentLesson?: number; // Legacy field for Informatica
+  currentCourseId?: string; // Current active course
+  createdAt: string;
+}
+
+export interface Enrollment {
+  id: string; // Course ID (e.g., 'INF', 'AAS')
+  courseId: string;
+  courseName: string;
+  currentLesson: number;
+  status: "ativo" | "concluido";
+  enrolledAt: any;
+  unlockedBadges: string[];
+}
+
+export interface Lesson {
+  num: number;
+  title: string;
+  description?: string;
+  videoUrl?: string;
+  missionChallenge?: string;
+}
+
+export interface Course {
+  id: string;
+  title: string;
+  modules: {
+    name: string;
+    lessons: Lesson[];
+  }[];
+  badges?: Badge[];
   createdAt: string;
 }
 
@@ -131,8 +162,9 @@ export interface Badge {
   id: string;
   name: string;
   description: string;
-  unlockClass: number;
+  unlockClass?: number;
   icon: string;
+  xpReward?: number;
 }
 
 export interface Rank {

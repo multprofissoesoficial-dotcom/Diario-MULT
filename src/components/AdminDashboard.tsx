@@ -34,6 +34,7 @@ import { ROLES_LABELS, RANKS, XP_PER_MISSION, XP_BONUS } from "../constants";
 import { motion, AnimatePresence } from "motion/react";
 import Papa from "papaparse";
 import AtsDashboard from "./AtsDashboard";
+import CourseManager from "./CourseManager";
 import { 
   BarChart, 
   Bar, 
@@ -72,7 +73,9 @@ import {
   CheckCircle,
   Zap,
   XCircle,
-  Calendar
+  Calendar,
+  BookOpen,
+  Settings
 } from "lucide-react";
 
 export default function AdminDashboard({ profile }: { profile: UserProfile }) {
@@ -97,9 +100,14 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [hasMore, setHasMore] = useState(true);
   const [pendingOnly, setPendingOnly] = useState(false);
   const [pendingMissions, setPendingMissions] = useState<Mission[]>([]);
-  const [activeTab, setActiveTab] = useState<"users" | "activities" | "ats">(
+  const [courses, setCourses] = useState<any[]>([]);
+  const [selectedCourseId, setSelectedCourseId] = useState<string>("INF");
+  const [activeTab, setActiveTab] = useState<"users" | "activities" | "ats" | "courses" | "maintenance">(
     profile.role === "rh" ? "ats" : "users"
   );
+  const [maintenanceReport, setMaintenanceReport] = useState<any>(null);
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false);
+  const [showMaintenanceConfirm, setShowMaintenanceConfirm] = useState(false);
   const [allMissions, setAllMissions] = useState<Mission[]>([]);
   const [lastMissionDoc, setLastMissionDoc] = useState<any>(null);
   const [hasMoreMissions, setHasMoreMissions] = useState(true);
@@ -152,12 +160,15 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     // Fetch unique turmas
     const fetchTurmas = async () => {
       try {
-        let q = query(collection(db, "users"), where("role", "==", "aluno"), limit(1000));
+        let q = query(collection(db, "users"));
+        
         if (profile.role !== "master") {
           q = query(q, where("franquiaId", "==", profile.franquiaId));
         } else if (selectedFranquia !== "all") {
           q = query(q, where("franquiaId", "==", selectedFranquia));
         }
+
+        q = query(q, where("role", "==", "aluno"), limit(1000));
         const snap = await getDocs(q);
         const uniqueTurmas = Array.from(new Set(snap.docs.map(d => d.data().turma).filter(Boolean)));
         setTurmas(uniqueTurmas as string[]);
@@ -174,7 +185,14 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       setFranquias(snap.docs.map(d => d.data() as Franquia));
     });
 
-    return () => unsubFranquias();
+    const unsubCourses = onSnapshot(collection(db, "courses"), (snap) => {
+      setCourses(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+    return () => {
+      unsubFranquias();
+      unsubCourses();
+    };
   }, []);
 
   useEffect(() => {
@@ -196,12 +214,18 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       const companyBaseQuery = collection(db, "companies");
 
       const getCount = async (base: any, filters: any[] = []) => {
-        let q = query(base, ...filters);
+        let q = query(base);
+        
         if (profile.role !== "master") {
           q = query(q, where("franquiaId", "==", profile.franquiaId));
         } else if (selectedFranquia !== "all") {
           q = query(q, where("franquiaId", "==", selectedFranquia));
         }
+
+        if (filters.length > 0) {
+          q = query(q, ...filters);
+        }
+        
         const snap = await getCountFromServer(q);
         return snap.data().count;
       };
@@ -258,14 +282,16 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const fetchUsers = async (reset = false) => {
     setLoading(true);
     try {
-      let q = query(collection(db, "users"), limit(usersPerPage));
+      let q = query(collection(db, "users"));
       
+      // 1. Primary Filter: Franquia (Security Layer)
       if (profile.role !== "master") {
         q = query(q, where("franquiaId", "==", profile.franquiaId));
       } else if (selectedFranquia !== "all") {
         q = query(q, where("franquiaId", "==", selectedFranquia));
       }
 
+      // 2. Secondary Filters
       if (roleFilter !== "all") {
         q = query(q, where("role", "==", roleFilter));
       }
@@ -275,15 +301,24 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       }
 
       if (searchQuery) {
-        // Server-side search logic
-        q = query(q, 
-          where("displayName", ">=", searchQuery),
-          where("displayName", "<=", searchQuery + "\uf8ff")
-        );
+        // Check if search query is a code (numeric)
+        const isCode = /^\d+$/.test(searchQuery);
+        
+        if (isCode) {
+          q = query(q, where("codigo", "==", searchQuery));
+        } else {
+          // Server-side search logic for name
+          q = query(q, 
+            where("displayName", ">=", searchQuery),
+            where("displayName", "<=", searchQuery + "\uf8ff")
+          );
+        }
       } else {
         // If no search, we can order by displayName for consistency
         q = query(q, orderBy("displayName"));
       }
+
+      q = query(q, limit(usersPerPage));
 
       if (!reset && lastDoc) {
         q = query(q, startAfter(lastDoc));
@@ -435,11 +470,22 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     setLoading(true);
     try {
       // 1. Get all students
-      const studentsQuery = query(collection(db, "users"), where("role", "==", "aluno"));
+      let studentsQuery = query(collection(db, "users"), where("role", "==", "aluno"));
+      if (profile.role !== "master") {
+        studentsQuery = query(studentsQuery, where("franquiaId", "==", profile.franquiaId));
+      } else if (selectedFranquia !== "all") {
+        studentsQuery = query(studentsQuery, where("franquiaId", "==", selectedFranquia));
+      }
       const studentsSnap = await getDocs(studentsQuery);
       
       // 2. Get all missions (to be safe, we'll clear all missions since they belong to students)
-      const missionsSnap = await getDocs(collection(db, "missions"));
+      let missionsQuery = query(collection(db, "missions"));
+      if (profile.role !== "master") {
+        missionsQuery = query(missionsQuery, where("franquiaId", "==", profile.franquiaId));
+      } else if (selectedFranquia !== "all") {
+        missionsQuery = query(missionsQuery, where("franquiaId", "==", selectedFranquia));
+      }
+      const missionsSnap = await getDocs(missionsQuery);
 
       const totalToDelete = studentsSnap.size + missionsSnap.size;
       let deletedCount = 0;
@@ -547,7 +593,11 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({ students: studentsToImport }),
+        body: JSON.stringify({ 
+          students: studentsToImport,
+          courseId: selectedCourseId,
+          courseName: courses.find(c => c.id === selectedCourseId)?.title || "Informática"
+        }),
       });
 
       if (!response.ok) {
@@ -740,6 +790,37 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       setLoading(false);
     }
   };
+  const handleRunMaintenance = async () => {
+    setMaintenanceLoading(true);
+    setMaintenanceReport(null);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const response = await fetch("/api/maintenance/sanitize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ action: "sanitize" })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao executar manutenção");
+      }
+
+      const result = await response.json();
+      setMaintenanceReport(result.report);
+      setShowMaintenanceConfirm(false);
+      fetchCounts(); // Refresh counts after cleanup
+    } catch (err: any) {
+      console.error("Erro na manutenção:", err);
+      alert("Erro na manutenção: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setMaintenanceLoading(false);
+    }
+  };
+
   const handleCreateFranquia = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -826,6 +907,28 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           >
             <Briefcase className="w-4 h-4" /> Agência (ATS)
           </button>
+        )}
+        {profile.role === "master" && (
+          <>
+            <button
+              onClick={() => setActiveTab("courses")}
+              className={cn(
+                "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                activeTab === "courses" ? "bg-mult-orange text-white neon-glow-orange" : "text-gray-500 hover:text-white"
+              )}
+            >
+              <BookOpen className="w-4 h-4" /> Gestão de Cursos
+            </button>
+            <button
+              onClick={() => setActiveTab("maintenance")}
+              className={cn(
+                "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                activeTab === "maintenance" ? "bg-red-500 text-white neon-glow-red" : "text-gray-500 hover:text-white"
+              )}
+            >
+              <Settings className="w-4 h-4" /> Manutenção
+            </button>
+          </>
         )}
       </div>
 
@@ -1080,6 +1183,93 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
               </div>
             </div>
           </div>
+        </div>
+      ) : activeTab === "courses" ? (
+        <CourseManager courses={courses} />
+      ) : activeTab === "maintenance" ? (
+        <div className="space-y-8">
+          <div className="glass-card p-8 border-red-500/20 bg-red-500/5">
+            <div className="flex items-start gap-6">
+              <div className="w-16 h-16 rounded-2xl bg-red-500/20 flex items-center justify-center text-red-500 shrink-0 border border-red-500/30">
+                <ShieldCheck className="w-8 h-8" />
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Saneador de Identidade</h2>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Ferramenta crítica para normalização do banco de dados. Esta ação irá:
+                  </p>
+                </div>
+                
+                <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {[
+                    "Identificar e remover alunos duplicados (mesmo código na mesma unidade)",
+                    "Preservar o registro com maior progresso (missões)",
+                    "Normalizar IDs de documentos para o padrão {franquiaId}_{codigo}",
+                    "Migrar missões e candidaturas para os novos IDs",
+                    "Garantir integridade de multitenancy (multifranquias)"
+                  ].map((item, i) => (
+                    <li key={i} className="flex items-center gap-3 text-xs text-gray-300">
+                      <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="pt-4 flex items-center gap-4">
+                  <button
+                    onClick={() => setShowMaintenanceConfirm(true)}
+                    disabled={maintenanceLoading}
+                    className="bg-red-500 hover:bg-red-600 text-white font-black py-4 px-8 rounded-xl transition-all neon-glow-red text-xs uppercase tracking-widest flex items-center gap-3 disabled:opacity-50"
+                  >
+                    {maintenanceLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Zap className="w-5 h-5" />
+                    )}
+                    Executar Saneamento de Banco
+                  </button>
+                  <p className="text-[10px] text-red-400/60 font-bold uppercase tracking-widest max-w-xs">
+                    * Esta ação é irreversível e afeta todos os registros da coleção global de usuários.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {maintenanceReport && (
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="glass-card p-8 border-green-500/20 bg-green-500/5"
+            >
+              <div className="flex items-center gap-4 mb-6">
+                <div className="w-10 h-10 rounded-xl bg-green-500/20 flex items-center justify-center text-green-500 border border-green-500/30">
+                  <CheckCircle className="w-6 h-6" />
+                </div>
+                <h3 className="text-lg font-black text-white uppercase tracking-tighter">Relatório de Manutenção</h3>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="p-4 bg-black/40 rounded-xl border border-white/5">
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Analisados</p>
+                  <p className="text-2xl font-black text-white">{maintenanceReport.analyzed}</p>
+                </div>
+                <div className="p-4 bg-black/40 rounded-xl border border-white/5">
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Duplicados Removidos</p>
+                  <p className="text-2xl font-black text-red-400">{maintenanceReport.duplicatesRemoved}</p>
+                </div>
+                <div className="p-4 bg-black/40 rounded-xl border border-white/5">
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">IDs Normalizados</p>
+                  <p className="text-2xl font-black text-neon-blue">{maintenanceReport.normalized}</p>
+                </div>
+                <div className="p-4 bg-black/40 rounded-xl border border-white/5">
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Status</p>
+                  <p className="text-sm font-black text-green-400 uppercase tracking-widest">Concluído</p>
+                </div>
+              </div>
+            </motion.div>
+          )}
         </div>
       ) : null}
 
@@ -1543,6 +1733,51 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
       {/* Modals */}
       <AnimatePresence>
+        {showMaintenanceConfirm && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="glass-card max-w-md w-full p-8 border-red-500/50"
+            >
+              <div className="flex flex-col items-center text-center space-y-6">
+                <div className="w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center text-red-500 border-4 border-red-500/30 animate-pulse">
+                  <AlertCircle className="w-10 h-10" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Confirmação Crítica</h3>
+                  <p className="text-gray-400 text-sm mt-2">
+                    Você está prestes a executar o Saneador de Identidade. Esta ação irá remover permanentemente registros duplicados e reestruturar IDs de documentos.
+                  </p>
+                </div>
+                
+                <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl w-full">
+                  <p className="text-xs text-red-400 font-bold">
+                    Certifique-se de que nenhum aluno esteja realizando atividades no momento.
+                  </p>
+                </div>
+
+                <div className="flex flex-col w-full gap-3">
+                  <button
+                    onClick={handleRunMaintenance}
+                    disabled={maintenanceLoading}
+                    className="w-full bg-red-500 hover:bg-red-600 text-white font-black py-4 rounded-xl transition-all neon-glow-red text-xs uppercase tracking-widest flex items-center justify-center gap-2"
+                  >
+                    {maintenanceLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Sim, Executar Manutenção"}
+                  </button>
+                  <button
+                    onClick={() => setShowMaintenanceConfirm(false)}
+                    disabled={maintenanceLoading}
+                    className="w-full bg-white/5 hover:bg-white/10 text-gray-400 font-black py-4 rounded-xl transition-all text-xs uppercase tracking-widest"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
         {showMissionHistory && (
           <MissionHistoryModal 
             student={showMissionHistory} 
@@ -1582,6 +1817,23 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
               </div>
 
               <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                    <Target className="w-3 h-3" /> Selecionar Curso para Importação:
+                  </label>
+                  <select 
+                    value={selectedCourseId}
+                    onChange={(e) => setSelectedCourseId(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm focus:outline-none focus:border-neon-blue transition-all"
+                  >
+                    {courses.map(course => (
+                      <option key={course.id} value={course.id} className="bg-cockpit-bg">
+                        {course.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <textarea 
                   value={importText}
                   onChange={e => { setImportText(e.target.value); setImportPreview([]); }}

@@ -16,7 +16,7 @@ import {
   serverTimestamp
 } from "firebase/firestore";
 import { db } from "../firebase";
-import { UserProfile, JobPosting, Application, SkillTag, Company, ApplicationStatus, Franquia, JobStatus, SelectionProcessType } from "../types";
+import { UserProfile, JobPosting, Application, SkillTag, Company, ApplicationStatus, Franquia, JobStatus, SelectionProcessType, Enrollment } from "../types";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Briefcase, 
@@ -41,9 +41,10 @@ import {
   Download,
   Edit3,
   Calendar,
-  Target
+  Target,
+  BookOpen
 } from "lucide-react";
-import { cn, handleFirestoreError, OperationType } from "../lib/utils";
+import { cn, handleFirestoreError, OperationType, sanitizeText } from "../lib/utils";
 
 const SKILLS: SkillTag[] = [
   'Boa Comunicação', 'Trabalho em Equipe', 'Proatividade', 'Organização', 
@@ -66,6 +67,7 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
   const [loading, setLoading] = useState(false);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState<(Application & { student?: UserProfile }) | null>(null);
+  const [candidateEnrollments, setCandidateEnrollments] = useState<Enrollment[]>([]);
   const [showDocModal, setShowDocModal] = useState(false);
   const [selectedDocType, setSelectedDocType] = useState<"apresentacao" | "confirmacao" | null>(null);
   const [showDocDropdown, setShowDocDropdown] = useState(false);
@@ -80,6 +82,19 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
       const franquiaId = profile.franquiaId || "global";
       setTempPerceptionNotes(selectedCandidate.student?.perceptions?.[franquiaId]?.notes || "");
       setTempWithdrawalReason(selectedCandidate.student?.withdrawalReason || "");
+
+      // Fetch enrollments
+      const fetchEnrollments = async () => {
+        try {
+          const snap = await getDocs(collection(db, "users", selectedCandidate.studentId, "enrollments"));
+          setCandidateEnrollments(snap.docs.map(d => d.data() as Enrollment));
+        } catch (error) {
+          console.error("Error fetching candidate enrollments:", error);
+        }
+      };
+      fetchEnrollments();
+    } else {
+      setCandidateEnrollments([]);
     }
   }, [selectedCandidate, profile.franquiaId]);
 
@@ -275,9 +290,10 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
   const updateStudentPerceptions = async (studentId: string, rating: number, notes: string) => {
     setIsSavingCRM(true);
     try {
+      const sanitizedNotes = sanitizeText(notes);
       const franquiaId = profile.franquiaId || "global";
       await updateDoc(doc(db, "users", studentId), {
-        [`perceptions.${franquiaId}`]: { rating, notes }
+        [`perceptions.${franquiaId}`]: { rating, notes: sanitizedNotes }
       });
 
       // Update local state
@@ -287,7 +303,7 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
           ...app.student,
           perceptions: {
             ...app.student.perceptions,
-            [franquiaId]: { rating, notes }
+            [franquiaId]: { rating, notes: sanitizedNotes }
           }
         } : undefined
       } : app));
@@ -299,7 +315,7 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
             ...prev.student,
             perceptions: {
               ...prev.student.perceptions,
-              [franquiaId]: { rating, notes }
+              [franquiaId]: { rating, notes: sanitizedNotes }
             }
           } : undefined
         } : null);
@@ -314,20 +330,21 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
   const updateWithdrawalReason = async (studentId: string, reason: string) => {
     setIsSavingCRM(true);
     try {
+      const sanitizedReason = sanitizeText(reason);
       await updateDoc(doc(db, "users", studentId), {
-        withdrawalReason: reason
+        withdrawalReason: sanitizedReason
       });
       
       // Update local state
       setApplications(prev => prev.map(a => a.studentId === studentId ? {
         ...a,
-        student: a.student ? { ...a.student, withdrawalReason: reason } : undefined
+        student: a.student ? { ...a.student, withdrawalReason: sanitizedReason } : undefined
       } : a));
 
       if (selectedCandidate?.studentId === studentId) {
         setSelectedCandidate(prev => prev ? {
           ...prev,
-          student: prev.student ? { ...prev.student, withdrawalReason: reason } : undefined
+          student: prev.student ? { ...prev.student, withdrawalReason: sanitizedReason } : undefined
         } : null);
       }
     } catch (err) {
@@ -1319,6 +1336,32 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
                           <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-1">Telefone</p>
                           <p className="text-xs font-bold text-white">{selectedCandidate.student?.phone || "Não informado"}</p>
                         </div>
+                      </div>
+                    </div>
+
+                    <div className="glass-card p-6 border-white/10">
+                      <h3 className="text-xs font-black uppercase tracking-widest text-mult-orange mb-4 flex items-center gap-2">
+                        <BookOpen className="w-4 h-4" /> Cursos Matriculados
+                      </h3>
+                      <div className="space-y-3">
+                        {candidateEnrollments.length > 0 ? (
+                          candidateEnrollments.map((enrollment) => (
+                            <div key={enrollment.courseId} className="p-3 bg-white/5 rounded-xl border border-white/5 flex items-center justify-between">
+                              <div>
+                                <p className="text-xs font-bold text-white uppercase tracking-tight">{enrollment.courseName}</p>
+                                <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mt-1">
+                                  Status: <span className={enrollment.status === 'concluido' ? "text-green-500" : "text-neon-blue"}>{enrollment.status}</span>
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Aula Atual</p>
+                                <p className="text-xs font-black text-mult-orange">{enrollment.currentLesson}</p>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-[10px] text-gray-500 italic uppercase tracking-widest text-center py-4">Nenhuma matrícula encontrada</p>
+                        )}
                       </div>
                     </div>
                   </div>

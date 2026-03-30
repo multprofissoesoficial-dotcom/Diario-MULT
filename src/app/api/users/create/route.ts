@@ -50,6 +50,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Dados incompletos" }, { status: 400 });
     }
 
+    // Composite ID for students
+    const compositeId = role === "aluno" && franquiaId && codigo 
+      ? `${franquiaId}_${codigo}`.toLowerCase().replace(/\s+/g, "")
+      : null;
+
     let finalEmail = email?.trim();
     if (role === "aluno" && !finalEmail && codigo) {
       finalEmail = `${codigo.trim()}@mult.com.br`;
@@ -61,13 +66,24 @@ export async function POST(request: Request) {
 
     let userRecord;
     try {
-      // Check if user already exists in Auth
-      userRecord = await adminAuth.getUserByEmail(finalEmail);
+      // 1. Try to get by compositeId if student
+      if (compositeId) {
+        try {
+          userRecord = await adminAuth.getUser(compositeId);
+        } catch (e) {
+          // Not found by compositeId, try by email
+          userRecord = await adminAuth.getUserByEmail(finalEmail);
+        }
+      } else {
+        // 2. Try by email for non-students or if no compositeId
+        userRecord = await adminAuth.getUserByEmail(finalEmail);
+      }
     } catch (error: any) {
       // If user not found, create it
       if (error.code === "auth/user-not-found" || error.message?.includes("NOT_FOUND")) {
         try {
           userRecord = await adminAuth.createUser({
+            uid: compositeId || undefined,
             email: finalEmail,
             password: senha,
             displayName: nome,

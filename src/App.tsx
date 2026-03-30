@@ -5,13 +5,41 @@ import Auth from "./components/Auth";
 import StudentDashboard from "./components/StudentDashboard";
 import TeacherDashboard from "./components/TeacherDashboard";
 import AdminDashboard from "./components/AdminDashboard";
+import CourseLobby from "./components/CourseLobby";
 import { motion, AnimatePresence } from "motion/react";
 import { Rocket, LogOut } from "lucide-react";
-import { auth } from "./firebase";
-import { useState } from "react";
+import { auth, db } from "./firebase";
+import { useState, useEffect } from "react";
+import { collection, onSnapshot, query, doc, updateDoc } from "firebase/firestore";
+import { Enrollment } from "./types";
 
 export default function App() {
   const { user, profile, loading } = useAuth();
+  const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
+  const [showLobby, setShowLobby] = useState(false);
+
+  useEffect(() => {
+    if (user && profile?.role === "aluno") {
+      const unsub = onSnapshot(collection(db, "users", user.uid, "enrollments"), (snap) => {
+        const list = snap.docs.map(d => d.data() as Enrollment);
+        setEnrollments(list);
+        
+        // If multiple enrollments and no currentCourseId, show lobby
+        if (list.length > 1 && !profile.currentCourseId) {
+          setShowLobby(true);
+        } else if (list.length === 1 && !profile.currentCourseId) {
+          // Auto-select the only course
+          updateDoc(doc(db, "users", user.uid), {
+            currentCourseId: list[0].courseId
+          });
+          setShowLobby(false);
+        } else {
+          setShowLobby(false);
+        }
+      });
+      return () => unsub();
+    }
+  }, [user, profile?.role, profile?.currentCourseId]);
 
   if (loading) {
     return (
@@ -53,7 +81,15 @@ export default function App() {
             exit={{ opacity: 0 }}
           >
             {profile.role === "aluno" ? (
-              <StudentDashboard profile={profile} />
+              showLobby ? (
+                <CourseLobby 
+                  profile={profile} 
+                  enrollments={enrollments} 
+                  onSelect={() => setShowLobby(false)} 
+                />
+              ) : (
+                <StudentDashboard profile={profile} />
+              )
             ) : profile.role === "professor" ? (
               <TeacherDashboard profile={profile} />
             ) : (

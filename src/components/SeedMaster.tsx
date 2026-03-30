@@ -55,9 +55,52 @@ export default function SeedMaster() {
         await setDoc(doc(db, "franquias", f1.id), f1);
         await setDoc(doc(db, "franquias", f2.id), f2);
         setStatus("Franquias criadas com sucesso.");
-      } else {
-        setStatus("Franquias já existem.");
       }
+
+      // 4. Criar Cursos Iniciais
+      setStatus("Criando cursos iniciais...");
+      const courses = [
+        {
+          id: "INF",
+          title: "Informática Profissional",
+          modules: [
+            { name: "Introdução", lessons: [{ num: 1, title: "Primeiros Passos" }] }
+          ],
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: "AAS",
+          title: "Assistente Administrativo e Secretariado",
+          modules: [
+            { 
+              name: "Assistente Administrativo", 
+              lessons: Array.from({ length: 9 }, (_, i) => ({ num: i + 1, title: `Aula ${i + 1}` })) 
+            },
+            { 
+              name: "Secretariado", 
+              lessons: Array.from({ length: 10 }, (_, i) => ({ num: i + 10, title: `Aula ${i + 10}` })) 
+            },
+            { 
+              name: "Departamento Pessoal", 
+              lessons: Array.from({ length: 11 }, (_, i) => ({ num: i + 20, title: `Aula ${i + 20}` })) 
+            },
+            { 
+              name: "RH", 
+              lessons: Array.from({ length: 2 }, (_, i) => ({ num: i + 31, title: `Aula ${i + 31}` })) 
+            },
+            { 
+              name: "Contabilidade", 
+              lessons: Array.from({ length: 8 }, (_, i) => ({ num: i + 33, title: `Aula ${i + 33}` })) 
+            }
+          ],
+          createdAt: new Date().toISOString()
+        }
+      ];
+
+      for (const course of courses) {
+        await setDoc(doc(db, "courses", course.id), course);
+      }
+      setStatus("Cursos criados com sucesso.");
 
       setStatus("SEED CONCLUÍDO COM SUCESSO!");
 

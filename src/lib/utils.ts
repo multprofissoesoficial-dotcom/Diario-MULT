@@ -1,9 +1,18 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { auth } from "../firebase";
+import DOMPurify from "dompurify";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+export function sanitizeText(text: string): string {
+  if (typeof window === 'undefined') return text; // SSR safety
+  return DOMPurify.sanitize(text, {
+    ALLOWED_TAGS: [], // No HTML allowed for these fields
+    ALLOWED_ATTR: []
+  }).trim();
 }
 
 export enum OperationType {

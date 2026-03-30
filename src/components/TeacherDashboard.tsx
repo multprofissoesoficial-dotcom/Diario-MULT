@@ -17,7 +17,7 @@ import {
   getDocs
 } from "firebase/firestore";
 import { db } from "../firebase";
-import { Mission, UserProfile } from "../types";
+import { Mission, UserProfile, Course } from "../types";
 import { XP_PER_MISSION, XP_BONUS } from "../constants";
 import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle, Zap, Clock, User as UserIcon, FileText, Search, Filter, LogOut, Rocket, UserPlus, Eye } from "lucide-react";
@@ -45,6 +45,8 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
   });
   const [filter, setFilter] = useState<"pending" | "all">("pending");
   const [turmaFilter, setTurmaFilter] = useState<string>("all");
+  const [courseFilter, setCourseFilter] = useState<string>("all");
+  const [courses, setCourses] = useState<Course[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [lastMissionDoc, setLastMissionDoc] = useState<any>(null);
   const [hasMoreMissions, setHasMoreMissions] = useState(true);
@@ -53,21 +55,36 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
   const studentsPerPage = 50;
 
   useEffect(() => {
+    const q = query(collection(db, "courses"), orderBy("title"));
+    const unsubscribe = onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Course));
+      setCourses(list);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
     fetchMissions(true);
-  }, [filter, profile.franquiaId, searchQuery]);
+  }, [filter, profile.franquiaId, searchQuery, courseFilter]);
 
   const fetchMissions = async (reset = false) => {
     setLoading(true);
     try {
-      let q = query(
-        collection(db, "missions"), 
-        where("franquiaId", "==", profile.franquiaId),
-        limit(studentsPerPage)
-      );
+      let q = query(collection(db, "missions"));
+      
+      // 1. Primary Filter: Franquia
+      q = query(q, where("franquiaId", "==", profile.franquiaId));
+
+      // 2. Secondary Filters
+      if (courseFilter !== "all") {
+        q = query(q, where("courseId", "==", courseFilter));
+      }
 
       if (filter === "pending") {
         q = query(q, where("status", "==", "pending"));
       }
+
+      q = query(q, limit(studentsPerPage));
 
       if (!reset && lastMissionDoc) {
         q = query(q, startAfter(lastMissionDoc));
@@ -99,21 +116,28 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
 
   useEffect(() => {
     fetchStudents(true);
-  }, [profile.franquiaId, turmaFilter, searchQuery]);
+  }, [profile.franquiaId, turmaFilter, searchQuery, courseFilter]);
 
   const fetchStudents = async (reset = false) => {
     setLoading(true);
     try {
-      let q = query(
-        collection(db, "users"), 
-        where("role", "==", "aluno"), 
-        where("franquiaId", "==", profile.franquiaId),
-        limit(studentsPerPage)
-      );
+      let q = query(collection(db, "users"));
+      
+      // 1. Primary Filter: Franquia
+      q = query(q, where("franquiaId", "==", profile.franquiaId));
+
+      // 2. Secondary Filters
+      q = query(q, where("role", "==", "aluno"));
+
+      if (courseFilter !== "all") {
+        q = query(q, where("currentCourseId", "==", courseFilter));
+      }
 
       if (turmaFilter !== "all") {
         q = query(q, where("turma", "==", turmaFilter));
       }
+
+      q = query(q, limit(studentsPerPage));
 
       if (!reset && lastStudentDoc) {
         q = query(q, startAfter(lastStudentDoc));
@@ -264,6 +288,16 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
         </div>
         <div className="md:col-span-2 glass-card p-4 flex flex-col sm:flex-row items-center justify-between px-6 gap-4">
           <div className="flex items-center gap-4 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0 no-scrollbar">
+            <select 
+              value={courseFilter}
+              onChange={(e) => setCourseFilter(e.target.value)}
+              className="bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-widest focus:outline-none focus:border-neon-blue transition-all shrink-0"
+            >
+              <option value="all">Todos os Cursos</option>
+              {courses.map(c => (
+                <option key={c.id} value={c.id}>{c.title}</option>
+              ))}
+            </select>
             <div className="flex gap-2 shrink-0">
               <button 
                 onClick={() => setView("missions")}

@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { collection, addDoc, query, where, orderBy, onSnapshot, doc, updateDoc, arrayUnion, serverTimestamp, getDocs } from "firebase/firestore";
 import { db, storage } from "../firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { UserProfile, Mission, Badge, SkillTag, JobPosting, Application } from "../types";
+import { UserProfile, Mission, Badge, SkillTag, JobPosting, Application, Enrollment, Course } from "../types";
 import { RANKS, BADGES } from "../constants";
 import { getAbsoluteLessonId, getRelativeLesson, getLessonsForModule } from "../utils/lessonMapper";
 import { motion, AnimatePresence } from "motion/react";
@@ -25,7 +25,7 @@ import {
   FileText
 } from "lucide-react";
 import { fireConfetti } from "../lib/confetti";
-import { cn, handleFirestoreError, OperationType } from "../lib/utils";
+import { cn, handleFirestoreError, OperationType, sanitizeText } from "../lib/utils";
 import { auth } from "../firebase";
 
 const iconMap: Record<string, React.ElementType> = {
@@ -67,6 +67,9 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
   const [classNum, setClassNum] = useState(1);
   const [content, setContent] = useState("");
   const [missions, setMissions] = useState<Mission[]>([]);
+  const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
+  const [activeEnrollment, setActiveEnrollment] = useState<Enrollment | null>(null);
+  const [activeCourse, setActiveCourse] = useState<Course | null>(null);
   const [loading, setLoading] = useState(false);
   const [aiFeedback, setAiFeedback] = useState<string | null>(null);
   const [newBadge, setNewBadge] = useState<Badge | null>(null);
@@ -79,6 +82,17 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
   const [jobs, setJobs] = useState<JobPosting[]>([]);
   const [userApplications, setUserApplications] = useState<Application[]>([]);
   const [applyingJobId, setApplyingJobId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (profile.currentCourseId) {
+      const unsub = onSnapshot(doc(db, "courses", profile.currentCourseId), (snap) => {
+        if (snap.exists()) {
+          setActiveCourse({ id: snap.id, ...snap.data() } as Course);
+        }
+      });
+      return () => unsub();
+    }
+  }, [profile.currentCourseId]);
 
   useEffect(() => {
     // Fetch Jobs - Multitenancy: Filter by franquiaId
@@ -101,7 +115,26 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
       unsubJobs();
       unsubApps();
     };
-  }, [profile.uid]);
+  }, [profile.uid, profile.franquiaId]);
+
+  useEffect(() => {
+    const enrollmentsRef = collection(db, "users", profile.uid, "enrollments");
+    const unsubEnrollments = onSnapshot(enrollmentsRef, (snap) => {
+      const list = snap.docs.map(d => d.data() as Enrollment);
+      setEnrollments(list);
+      
+      const active = list.find(e => e.courseId === profile.currentCourseId) || list[0] || null;
+      setActiveEnrollment(active);
+      
+      if (active) {
+        const { module: m, relativeLesson: l } = getRelativeLesson(active.currentLesson);
+        setModule(m);
+        setClassNum(l);
+      }
+    });
+
+    return () => unsubEnrollments();
+  }, [profile.uid, profile.currentCourseId]);
 
   useEffect(() => {
     const q = query(
@@ -127,13 +160,21 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     const completedClasses = new Set(approvedMissions.map(m => m.classNum));
     const maxClass = Math.max(0, ...Array.from(completedClasses));
 
-    const newBadges = BADGES.filter(badge => 
-      maxClass >= badge.unlockClass && !profile.unlockedBadges.includes(badge.id)
+    const badgesToUse = activeCourse?.badges || BADGES;
+    const newBadges = badgesToUse.filter(badge => 
+      maxClass >= (badge.unlockClass || 0) && !profile.unlockedBadges.includes(badge.id)
     );
 
     if (newBadges.length > 0) {
       const userRef = doc(db, "users", profile.uid);
+      const courseId = activeEnrollment?.courseId || "INF";
+      
       await updateDoc(userRef, {
+        unlockedBadges: arrayUnion(...newBadges.map(b => b.id))
+      });
+
+      // Also update enrollment badges
+      await updateDoc(doc(db, "users", profile.uid, "enrollments", courseId), {
         unlockedBadges: arrayUnion(...newBadges.map(b => b.id))
       });
       
@@ -150,27 +191,42 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     setLoading(true);
     setAiFeedback("IA analisando seu relatório...");
 
+    const sanitizedContent = sanitizeText(content);
+
     // Simulate AI analysis
     setTimeout(async () => {
       let feedback = "Excelente registro! Vi que você dominou habilidades cruciais hoje. Continue assim!";
-      const lowerContent = content.toLowerCase();
+      const lowerContent = sanitizedContent.toLowerCase();
       if (lowerContent.includes("drive") || lowerContent.includes("email") || lowerContent.includes("planilha")) {
         feedback = "Excelente registro! Vi que você dominou habilidades cruciais hoje. Continue assim!";
       }
 
       try {
+          const courseId = activeEnrollment?.courseId || "INF";
+          const courseName = activeEnrollment?.courseName || "Informática Profissional";
+          const absLesson = getAbsoluteLessonId(module, classNum);
+
           await addDoc(collection(db, "missions"), {
             studentId: profile.uid,
             studentName: profile.displayName,
             franquiaId: profile.franquiaId,
             turma: profile.turma || "024inf",
+            courseId,
+            courseName,
             module,
-            classNum: getAbsoluteLessonId(module, classNum),
-            content,
+            classNum: absLesson,
+            content: sanitizedContent,
             status: "pending",
             aiFeedback: feedback,
             createdAt: new Date().toISOString(),
           });
+
+          // Update currentLesson in enrollment
+          if (activeEnrollment && absLesson > activeEnrollment.currentLesson) {
+            await updateDoc(doc(db, "users", profile.uid, "enrollments", courseId), {
+              currentLesson: absLesson
+            });
+          }
 
         fireConfetti();
         setContent("");
@@ -331,10 +387,29 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
           </div>
           <div>
             <h1 className="text-xl sm:text-2xl font-black tracking-tighter leading-none">MULT <span className="text-mult-orange">PROFISSÕES</span></h1>
-            <p className="text-[9px] sm:text-[10px] font-black text-gray-500 uppercase tracking-widest mt-1">Cockpit v2.0 • Piloto {profile.displayName.split(' ')[0]}</p>
+            <p className="text-[9px] sm:text-[10px] font-black text-gray-500 uppercase tracking-widest mt-1">
+              {activeEnrollment ? activeEnrollment.courseName : "Cockpit v2.0"} • Piloto {profile.displayName.split(' ')[0]}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {enrollments.length > 1 && (
+            <select 
+              value={profile.currentCourseId}
+              onChange={async (e) => {
+                await updateDoc(doc(db, "users", profile.uid), {
+                  currentCourseId: e.target.value
+                });
+              }}
+              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[10px] font-black uppercase tracking-widest focus:outline-none focus:border-neon-blue transition-all mr-2"
+            >
+              {enrollments.map(e => (
+                <option key={e.courseId} value={e.courseId} className="bg-cockpit-bg">
+                  {e.courseName}
+                </option>
+              ))}
+            </select>
+          )}
           <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 mr-4">
             <button 
               onClick={() => setActiveTab("missions")}
@@ -412,9 +487,9 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
               <Trophy className="w-4 h-4 text-mult-orange" /> Medalhas Conquistadas
             </h3>
             <div className="grid grid-cols-4 sm:grid-cols-5 gap-3 sm:gap-4">
-              {BADGES.map((badge) => {
+              {(activeCourse?.badges || BADGES).map((badge) => {
                 const Icon = iconMap[badge.icon] || Trophy;
-                const isUnlocked = profile.unlockedBadges.includes(badge.id);
+                const isUnlocked = activeEnrollment?.unlockedBadges?.includes(badge.id);
                 return (
                   <div 
                     key={badge.id}
@@ -426,7 +501,11 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
                         : "bg-white/5 border-white/10 text-gray-600 grayscale opacity-50"
                     )}
                   >
-                    <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
+                    {badge.icon.startsWith('http') ? (
+                      <img src={badge.icon} alt={badge.name} className="w-5 h-5 sm:w-6 sm:h-6 object-contain" />
+                    ) : (
+                      <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
+                    )}
                   </div>
                 );
               })}

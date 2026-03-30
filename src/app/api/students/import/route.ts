@@ -43,9 +43,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Não autorizado (permissão insuficiente)" }, { status: 403 });
     }
 
-    const { students } = await request.json();
+    const { students, courseId, courseName } = await request.json();
 
-    if (!Array.isArray(students)) {
+    if (!Array.isArray(students) || !courseId || !courseName) {
       return NextResponse.json({ error: "Dados inválidos" }, { status: 400 });
     }
 
@@ -55,12 +55,11 @@ export async function POST(request: Request) {
       errors: 0,
     };
 
-    // Process in batches of 50 (Firestore limit is 500, but we also do Auth calls)
+    // Process in batches of 50
     const batchSize = 50;
     for (let i = 0; i < students.length; i += batchSize) {
       const chunk = students.slice(i, i + batchSize);
-      const batch = adminDb.batch();
-
+      
       await Promise.all(chunk.map(async (student: any) => {
         try {
           const { nome, email, codigo, senha, franquiaId, turma } = student;
@@ -75,56 +74,103 @@ export async function POST(request: Request) {
             finalEmail = `${codigo.trim()}@mult.com.br`;
           }
 
-          // Check if user exists in Firestore
-          const existingUser = await adminDb.collection("users")
-            .where("email", "==", finalEmail)
-            .limit(1)
-            .get();
+          // Composite ID for students
+          const compositeId = franquiaId && codigo 
+            ? `${franquiaId}_${codigo}`.toLowerCase().replace(/\s+/g, "")
+            : null;
 
-          if (!existingUser.empty) {
-            results.skipped++;
+          // Check if user exists in Firestore by compositeId first
+          let userRef;
+          let userData;
+
+          if (compositeId) {
+            const docRef = adminDb.collection("users").doc(compositeId);
+            const docSnap = await docRef.get();
+            if (docSnap.exists) {
+              userRef = docRef;
+              userData = docSnap.data();
+            }
+          }
+
+          // If not found by compositeId, try searching by codigo and franquiaId
+          if (!userRef && codigo && franquiaId) {
+            const existingByCode = await adminDb.collection("users")
+              .where("codigo", "==", codigo)
+              .where("franquiaId", "==", franquiaId)
+              .limit(1)
+              .get();
+
+            if (!existingByCode.empty) {
+              userRef = existingByCode.docs[0].ref;
+              userData = existingByCode.docs[0].data();
+            }
+          }
+
+          // If still not found, try by email
+          if (!userRef && finalEmail) {
+            const existingByEmail = await adminDb.collection("users")
+              .where("email", "==", finalEmail)
+              .limit(1)
+              .get();
+            
+            if (!existingByEmail.empty) {
+              userRef = existingByEmail.docs[0].ref;
+              userData = existingByEmail.docs[0].data();
+            }
+          }
+
+          if (userRef && userData) {
+            // Update existing user
+            await userRef.update({
+              franquiaId: franquiaId,
+              turma: turma || userData.turma || "024inf"
+            });
+
+            // Add/Update enrollment
+            const enrollmentRef = userRef.collection("enrollments").doc(courseId);
+            const enrollmentSnap = await enrollmentRef.get();
+
+            if (!enrollmentSnap.exists) {
+              await enrollmentRef.set({
+                courseId,
+                courseName,
+                currentLesson: 1,
+                status: "ativo",
+                enrolledAt: new Date().toISOString(),
+                unlockedBadges: []
+              });
+            }
+            results.success++;
             return;
           }
 
-          if (codigo) {
-            const existingCode = await adminDb.collection("users")
-              .where("codigo", "==", codigo)
-              .limit(1)
-              .get();
-            if (!existingCode.empty) {
-              results.skipped++;
-              return;
-            }
-          }
-
+          // Create new user
           let userRecord;
           try {
-            // Check if user already exists in Auth
-            userRecord = await adminAuth.getUserByEmail(finalEmail);
-          } catch (authErr: any) {
-            // Rule 2: If user not found, create it
-            if (authErr.code === "auth/user-not-found" || authErr.message?.includes("NOT_FOUND")) {
+            // Try to get by compositeId if exists in Auth
+            if (compositeId) {
               try {
-                userRecord = await adminAuth.createUser({
-                  email: finalEmail,
-                  password: senha || String(codigo) || "nome123",
-                  displayName: nome,
-                });
-              } catch (createErr: any) {
-                console.error(`Error creating user ${finalEmail}:`, createErr);
-                results.errors++;
-                return;
+                userRecord = await adminAuth.getUser(compositeId);
+              } catch (e) {
+                userRecord = await adminAuth.getUserByEmail(finalEmail);
               }
             } else {
-              // Log other auth errors
-              console.error(`Auth error for ${finalEmail}:`, authErr);
-              results.errors++;
-              return;
+              userRecord = await adminAuth.getUserByEmail(finalEmail);
+            }
+          } catch (authErr: any) {
+            if (authErr.code === "auth/user-not-found" || authErr.message?.includes("NOT_FOUND")) {
+              userRecord = await adminAuth.createUser({
+                uid: compositeId || undefined,
+                email: finalEmail,
+                password: senha || String(codigo) || "nome123",
+                displayName: nome,
+              });
+            } else {
+              throw authErr;
             }
           }
 
-          const userRef = adminDb.collection("users").doc(userRecord.uid);
-          
+          const newUserRef = adminDb.collection("users").doc(userRecord.uid);
           const studentData = {
             uid: userRecord.uid,
             displayName: nome,
@@ -136,9 +182,20 @@ export async function POST(request: Request) {
             xp: 0,
             unlockedBadges: [],
             createdAt: new Date().toISOString(),
+            currentCourseId: courseId
           };
 
-          batch.set(userRef, studentData, { merge: true });
+          await newUserRef.set(studentData);
+          
+          // Add initial enrollment
+          await newUserRef.collection("enrollments").doc(courseId).set({
+            courseId,
+            courseName,
+            currentLesson: 1,
+            status: "ativo",
+            enrolledAt: new Date().toISOString(),
+            unlockedBadges: []
+          });
 
           results.success++;
         } catch (err) {
@@ -146,8 +203,6 @@ export async function POST(request: Request) {
           results.errors++;
         }
       }));
-
-      await batch.commit();
     }
 
     return NextResponse.json(results);
