@@ -27,31 +27,78 @@ export function useAuth() {
   useEffect(() => {
     if (!user) return;
 
-    const docRef = doc(db, "users", user.uid);
-    
-    // First try direct UID match
-    const unsubProfile = onSnapshot(docRef, async (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data() as UserProfile;
-        handleProfileData(data, user.uid);
-      } else {
-        // Fallback: Search for document with legacyUid == user.uid
-        const q = query(collection(db, "users"), where("legacyUid", "==", user.uid), limit(1));
-        const querySnap = await getDocs(q);
-        if (!querySnap.empty) {
-          const data = querySnap.docs[0].data() as UserProfile;
-          handleProfileData(data, querySnap.docs[0].id);
+    let unsubProfile: (() => void) | null = null;
+
+    const fetchProfile = async () => {
+      setLoading(true);
+      try {
+        // Step 1: Try direct UID match (Standard for new users or non-migrated)
+        const docRef = doc(db, "users", user.uid);
+        const docSnap = await getDocs(query(collection(db, "users"), where("__name__", "==", user.uid), limit(1)));
+        
+        let finalDocId = "";
+        
+        if (!docSnap.empty) {
+          finalDocId = user.uid;
         } else {
+          // Step 2: Try composite ID from claims if available
+          const tokenResult = await user.getIdTokenResult();
+          const { franquiaId, codigo } = tokenResult.claims;
+          
+          if (franquiaId && codigo) {
+            const compositeId = `${franquiaId}_${codigo}`.toLowerCase().replace(/\s+/g, "");
+            const compositeSnap = await getDocs(query(collection(db, "users"), where("__name__", "==", compositeId), limit(1)));
+            if (!compositeSnap.empty) {
+              finalDocId = compositeId;
+            }
+          }
+          
+          // Step 3: Fallback Query (Search for document with legacyUid == user.uid)
+          // This is critical for old students already migrated to composite ID
+          if (!finalDocId) {
+            const q = query(collection(db, "users"), where("legacyUid", "==", user.uid), limit(1));
+            const querySnap = await getDocs(q);
+            if (!querySnap.empty) {
+              finalDocId = querySnap.docs[0].id;
+            }
+          }
+        }
+
+        if (finalDocId) {
+          // Set up real-time listener on the CORRECT document
+          unsubProfile = onSnapshot(doc(db, "users", finalDocId), (snap) => {
+            if (snap.exists()) {
+              const data = snap.data() as UserProfile;
+              handleProfileData(data, finalDocId);
+            } else {
+              setProfile(null);
+              setLoading(false);
+            }
+          }, (err) => {
+            console.error("Error in profile snapshot:", err);
+            setProfile(null);
+            setLoading(false);
+          });
+        } else {
+          console.warn("No profile found for user:", user.uid);
           setProfile(null);
           setLoading(false);
         }
+      } catch (err) {
+        console.error("Error fetching profile:", err);
+        setProfile(null);
+        setLoading(false);
       }
-    }, (error) => {
-      console.error("Error listening to profile:", error);
-      setLoading(false);
-    });
+    };
+
+    fetchProfile();
+
+    return () => {
+      if (unsubProfile) unsubProfile();
+    };
 
     async function handleProfileData(data: UserProfile, docId: string) {
+      if (!user) return;
       // Legacy Migration Logic (Enrollments)
       if (data.role === "aluno" && !data.currentCourseId) {
         console.log("Migrating legacy student profile...");
@@ -91,8 +138,6 @@ export function useAuth() {
       }
       setLoading(false);
     }
-
-    return () => unsubProfile();
   }, [user]);
 
   return { user, profile, loading };

@@ -115,6 +115,13 @@ export async function POST(request: Request) {
     // Rule 1: Use .set with merge: true
     await adminDb.collection("users").doc(userRecord.uid).set(userData, { merge: true });
 
+    // Set custom claims for easier identification in frontend
+    await adminAuth.setCustomUserClaims(userRecord.uid, {
+      role: role,
+      franquiaId: franquiaId || "",
+      codigo: codigo || ""
+    });
+
     return NextResponse.json({ success: true, uid: userRecord.uid });
   } catch (error: any) {
     console.error("Error creating user:", error);

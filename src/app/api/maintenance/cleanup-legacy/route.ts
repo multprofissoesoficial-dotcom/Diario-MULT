@@ -82,10 +82,26 @@ async function handleCleanupLegacy() {
             }
             await adminDb.collection("users").doc(currentId).delete();
           }
+
+          // Set custom claims for the legacy UID so it can find the official record
+          await adminAuth.setCustomUserClaims(currentId, {
+            role: "aluno",
+            franquiaId: franquiaId,
+            codigo: codigo
+          });
+
           report.duplicadosDeletados++;
         } else {
           // SE NÃO EXISTIR: Renomear (Mover)
           await moveUserRecord(currentId, expectedId, data);
+          
+          // Set custom claims for the legacy UID so it can find the official record
+          await adminAuth.setCustomUserClaims(currentId, {
+            role: "aluno",
+            franquiaId: franquiaId,
+            codigo: codigo
+          });
+
           report.loginsRecuperados++;
         }
       } catch (err: any) {
