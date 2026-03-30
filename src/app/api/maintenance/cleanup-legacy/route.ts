@@ -47,13 +47,29 @@ async function handleCleanupLegacy() {
       const franquiaId = String(data.franquiaId || "");
       const codigo = String(data.codigo || "");
 
+      // Forced Claims Injection for ALL analyzed students
+      if (franquiaId && codigo && franquiaId !== "pendente_revisao" && codigo !== "sem_codigo") {
+        try {
+          await adminAuth.setCustomUserClaims(currentId, {
+            role: "aluno",
+            franquiaId: franquiaId,
+            codigo: codigo
+          });
+        } catch (e: any) {
+          console.error(`Failed to set claims for ${currentId}:`, e);
+          report.errors.push(`Erro ao processar [${currentId}]: Falha ao injetar claims - ${e.message}`);
+        }
+      } else {
+        report.errors.push(`Erro ao processar [${currentId}]: Falta franquiaId ou codigo para injeção de claims`);
+      }
+
       if (!franquiaId || !codigo || franquiaId === "pendente_revisao" || codigo === "sem_codigo") {
         continue;
       }
 
       const expectedId = `${franquiaId}_${codigo}`;
 
-      // If currentId is already the expectedId, skip
+      // If currentId is already the expectedId, skip further processing but claims were set
       if (currentId === expectedId) continue;
 
       try {
@@ -83,30 +99,15 @@ async function handleCleanupLegacy() {
             await adminDb.collection("users").doc(currentId).delete();
           }
 
-          // Set custom claims for the legacy UID so it can find the official record
-          await adminAuth.setCustomUserClaims(currentId, {
-            role: "aluno",
-            franquiaId: franquiaId,
-            codigo: codigo
-          });
-
           report.duplicadosDeletados++;
         } else {
-          // SE NÃO EXISTIR: Renomear (Mover)
+          // SE NÃO EXISTIR: Renomear (Mover) - Reparador Forçado
           await moveUserRecord(currentId, expectedId, data);
-          
-          // Set custom claims for the legacy UID so it can find the official record
-          await adminAuth.setCustomUserClaims(currentId, {
-            role: "aluno",
-            franquiaId: franquiaId,
-            codigo: codigo
-          });
-
           report.loginsRecuperados++;
         }
       } catch (err: any) {
         console.error(`Error cleaning up legacy record ${currentId}:`, err);
-        report.errors.push(`Erro no registro ${currentId} (Código ${codigo}): ${err.message}`);
+        report.errors.push(`Erro ao processar [${currentId}]: ${err.message}`);
       }
     }
 

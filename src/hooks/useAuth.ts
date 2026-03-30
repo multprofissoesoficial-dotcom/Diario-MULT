@@ -41,25 +41,24 @@ export function useAuth() {
         if (!docSnap.empty) {
           finalDocId = user.uid;
         } else {
-          // Step 2: Try composite ID from claims if available
-          const tokenResult = await user.getIdTokenResult();
-          const { franquiaId, codigo } = tokenResult.claims;
+          // Step 2: Fallback Query (Search for document with legacyUid == user.uid)
+          // This is now the priority absolute for migrated students
+          const q = query(collection(db, "users"), where("legacyUid", "==", user.uid), limit(1));
+          const querySnap = await getDocs(q);
           
-          if (franquiaId && codigo) {
-            const compositeId = `${franquiaId}_${codigo}`.toLowerCase().replace(/\s+/g, "");
-            const compositeSnap = await getDocs(query(collection(db, "users"), where("__name__", "==", compositeId), limit(1)));
-            if (!compositeSnap.empty) {
-              finalDocId = compositeId;
-            }
-          }
-          
-          // Step 3: Fallback Query (Search for document with legacyUid == user.uid)
-          // This is critical for old students already migrated to composite ID
-          if (!finalDocId) {
-            const q = query(collection(db, "users"), where("legacyUid", "==", user.uid), limit(1));
-            const querySnap = await getDocs(q);
-            if (!querySnap.empty) {
-              finalDocId = querySnap.docs[0].id;
+          if (!querySnap.empty) {
+            finalDocId = querySnap.docs[0].id;
+          } else {
+            // Step 3: Try composite ID from claims if available
+            const tokenResult = await user.getIdTokenResult();
+            const { franquiaId, codigo } = tokenResult.claims;
+            
+            if (franquiaId && codigo) {
+              const compositeId = `${franquiaId}_${codigo}`.toLowerCase().replace(/\s+/g, "");
+              const compositeSnap = await getDocs(query(collection(db, "users"), where("__name__", "==", compositeId), limit(1)));
+              if (!compositeSnap.empty) {
+                finalDocId = compositeId;
+              }
             }
           }
         }
