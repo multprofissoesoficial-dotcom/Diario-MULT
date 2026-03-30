@@ -99,29 +99,32 @@ export function useAuth() {
 
     async function handleProfileData(data: UserProfile, docId: string) {
       if (!user) return;
-      // Legacy Migration Logic (Enrollments)
-      if (data.role === "aluno" && !data.currentCourseId) {
-        console.log("Migrating legacy student profile...");
-        const enrollmentsRef = collection(db, "users", docId, "enrollments");
-        const enrollmentsSnap = await getDocs(enrollmentsRef);
-        
-        if (enrollmentsSnap.empty) {
-          const courseId = "INF";
-          const courseName = "Informática Profissional";
-          
-          await setDoc(doc(db, "users", docId, "enrollments", courseId), {
-            courseId,
-            courseName,
-            currentLesson: data.currentLesson || 1,
-            status: "ativo",
-            enrolledAt: data.createdAt || new Date().toISOString(),
-            unlockedBadges: data.unlockedBadges || []
+
+      // Senior Audit: Detect legacy profile (ID == UID) and trigger server-side migration
+      if (data.role === "aluno" && docId === user.uid) {
+        console.warn("Legacy profile detected (ID == UID). Triggering server-side migration...");
+        try {
+          const idToken = await user.getIdToken();
+          const response = await fetch("/api/auth/migrate-legacy", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${idToken}`,
+              "Content-Type": "application/json"
+            }
           });
 
-          await updateDoc(doc(db, "users", docId), {
-            currentCourseId: courseId,
-            currentLesson: data.currentLesson || 1
-          });
+          if (response.ok) {
+            const result = await response.json();
+            console.log("Migration successful:", result);
+            // Force a re-fetch of the profile after migration
+            fetchProfile();
+            return;
+          } else {
+            const errorData = await response.json();
+            console.error("Migration failed:", errorData.error);
+          }
+        } catch (err) {
+          console.error("Error during migration call:", err);
         }
       }
 
