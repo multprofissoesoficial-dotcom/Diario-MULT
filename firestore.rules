@@ -13,37 +13,37 @@ service cloud.firestore {
     }
 
     function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let path = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(path) ? get(path).data : null;
     }
 
     function isPCM() {
-      return isAuthenticated() && getUserData().role in ['master', 'coordenador', 'professor', 'rh'];
+      let data = getUserData();
+      return isAuthenticated() && data != null && data.role in ['master', 'coordenador', 'professor', 'rh'];
     }
 
     function isATSAdmin() {
-      return isAuthenticated() && getUserData().role in ['master', 'coordenador', 'rh'];
+      let data = getUserData();
+      return isAuthenticated() && data != null && data.role in ['master', 'coordenador', 'rh'];
     }
 
     function isOwner(userId) {
+      let userPath = /databases/$(database)/documents/users/$(userId);
       return isAuthenticated() && (
         request.auth.uid == userId || 
-        get(/databases/$(database)/documents/users/$(userId)).data.legacyUid == request.auth.uid ||
-        get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+        (exists(userPath) && (get(userPath).data.legacyUid == request.auth.uid || get(userPath).data.uid == request.auth.uid))
       );
     }
 
     function isStudentOwner(studentId) {
-      return isAuthenticated() && (
-        request.auth.uid == studentId ||
-        get(/databases/$(database)/documents/users/$(studentId)).data.legacyUid == request.auth.uid ||
-        get(/databases/$(database)/documents/users/$(studentId)).data.uid == request.auth.uid
-      );
+      return isOwner(studentId);
     }
 
     function isMaster() {
+      let data = getUserData();
       return isAuthenticated() && (
         request.auth.token.email == "multprofissoesoficial@gmail.com" ||
-        getUserData().role == 'master'
+        (data != null && data.role == 'master')
       );
     }
 
@@ -103,14 +103,13 @@ service cloud.firestore {
       // We check if the doc ID is their UID OR if the legacyUid field matches their UID.
       allow get: if isAuthenticated() && (
         request.auth.uid == userId || 
-        (resource != null && request.auth.uid == resource.data.legacyUid) ||
-        (resource != null && request.auth.uid == resource.data.uid)
+        (resource != null && (resource.data.legacyUid == request.auth.uid || resource.data.uid == request.auth.uid))
       );
       
       // Allow students to query (list) their own document via uid or legacyUid
       allow list: if isAuthenticated() && (
         isPCM() || 
-        (resource.data.uid == request.auth.uid || resource.data.legacyUid == request.auth.uid)
+        (request.query.limit <= 10 && (resource.data.uid == request.auth.uid || resource.data.legacyUid == request.auth.uid))
       );
 
       // PCM can read any user in their franchise (or all if master/rh)

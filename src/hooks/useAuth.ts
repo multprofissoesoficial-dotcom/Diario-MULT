@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { onAuthStateChanged, User } from "firebase/auth";
-import { doc, onSnapshot, updateDoc, serverTimestamp, collection, getDocs, setDoc, query, where, limit } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc, serverTimestamp, collection, getDocs, setDoc, query, where, limit, getDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { UserProfile } from "../types";
 
@@ -34,11 +34,11 @@ export function useAuth() {
       try {
         // Step 1: Try direct UID match (Standard for new users or non-migrated)
         const docRef = doc(db, "users", user.uid);
-        const docSnap = await getDocs(query(collection(db, "users"), where("__name__", "==", user.uid), limit(1)));
+        const docSnap = await getDoc(docRef);
         
         let finalDocId = "";
         
-        if (!docSnap.empty) {
+        if (docSnap.exists()) {
           finalDocId = user.uid;
         } else {
           // Step 2: Fallback Query (Search for document with legacyUid == user.uid)
@@ -55,8 +55,9 @@ export function useAuth() {
             
             if (franquiaId && codigo) {
               const compositeId = `${franquiaId}_${codigo}`.toLowerCase().replace(/\s+/g, "");
-              const compositeSnap = await getDocs(query(collection(db, "users"), where("__name__", "==", compositeId), limit(1)));
-              if (!compositeSnap.empty) {
+              const compositeDocRef = doc(db, "users", compositeId);
+              const compositeSnap = await getDoc(compositeDocRef);
+              if (compositeSnap.exists()) {
                 finalDocId = compositeId;
               }
             }
