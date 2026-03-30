@@ -41,148 +41,189 @@ async function handleSanitize() {
     errors: [] as string[]
   };
 
-  // 1. Fetch all students
-  const studentsSnap = await adminDb.collection("users").where("role", "==", "aluno").get();
-  report.analyzed = studentsSnap.size;
+  try {
+    const studentsSnap = await adminDb.collection("users").where("role", "==", "aluno").get();
+    report.analyzed = studentsSnap.size;
 
-  const groups: Record<string, any[]> = {};
+    const groups: Record<string, any[]> = {};
 
-  // 2. Group by franquiaId and codigo
-  studentsSnap.forEach(doc => {
-    const data = doc.data();
-    const franquiaId = String(data.franquiaId || "pendente_revisao");
-    const codigo = String(data.codigo || "sem_codigo");
-    const key = `${franquiaId}_${codigo}`;
+    // 1. Group by franquiaId and codigo
+    studentsSnap.forEach(doc => {
+      const data = doc.data();
+      const franquiaId = String(data.franquiaId || "pendente_revisao");
+      const codigo = String(data.codigo || "sem_codigo");
+      const key = `${franquiaId}_${codigo}`;
 
-    if (!groups[key]) groups[key] = [];
-    groups[key].push({ id: doc.id, ...data });
+      if (!groups[key]) groups[key] = [];
+      groups[key].push({ id: doc.id, ...data });
+    });
+
+    // 2. Process each group with Fusion Logic
+    for (const key in groups) {
+      const group = groups[key];
+      const [franquiaId, codigo] = key.split('_');
+
+      try {
+        const expectedId = key;
+        
+        // Check if the expectedId document already exists in Firestore
+        const naturalDoc = await adminDb.collection("users").doc(expectedId).get();
+        
+        // Identify legacy records in the current group (those with random UIDs)
+        let legacyRecords = group.filter(r => r.id !== expectedId);
+
+        // FUSION LOGIC
+        if (!naturalDoc.exists) {
+          // No natural record exists yet. 
+          if (legacyRecords.length === 0) continue;
+
+          // Pick the best legacy record to BECOME the natural one (Survivor)
+          const legacyWithMissions = await Promise.all(legacyRecords.map(async (student) => {
+            const missionsSnap = await adminDb.collection("missions")
+              .where("studentId", "==", student.id)
+              .count()
+              .get();
+            return { ...student, missionCount: missionsSnap.data().count };
+          }));
+
+          legacyWithMissions.sort((a, b) => {
+            if (b.missionCount !== a.missionCount) return b.missionCount - a.missionCount;
+            const dateA = new Date(a.createdAt || 0).getTime();
+            const dateB = new Date(b.createdAt || 0).getTime();
+            return dateA - dateB;
+          });
+
+          const bestLegacy = legacyWithMissions[0];
+          
+          // Move bestLegacy to expectedId (Atomic Move)
+          await moveUserRecord(bestLegacy.id, expectedId, bestLegacy);
+          report.normalized++;
+          
+          // The rest of the legacy records will be merged into this new expectedId
+          legacyRecords = legacyWithMissions.slice(1);
+        }
+
+        // Merge remaining legacy records into the survivor (expectedId)
+        for (const legacy of legacyRecords) {
+          await mergeUserRecord(legacy.id, expectedId);
+          report.duplicatesRemoved++;
+        }
+
+      } catch (err: any) {
+        console.error(`Error processing group ${key}:`, err);
+        report.errors.push(`Erro no código ${codigo} (${franquiaId}): ${err.message}`);
+      }
+    }
+
+    return NextResponse.json({ 
+      message: "Saneamento concluído com sucesso",
+      report 
+    });
+  } catch (error: any) {
+    console.error("Critical Maintenance Error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+/**
+ * Moves a user record from an old ID to a new ID, including all associated data.
+ */
+async function moveUserRecord(oldId: string, newId: string, data: any) {
+  const oldRef = adminDb.collection("users").doc(oldId);
+  const newRef = adminDb.collection("users").doc(newId);
+
+  // Prepare data for the new document
+  const { id, missionCount, ...dataToCopy } = data;
+  dataToCopy.legacyUid = oldId;
+  dataToCopy.franquiaId = String(dataToCopy.franquiaId);
+  dataToCopy.codigo = String(dataToCopy.codigo);
+
+  // 1. Transfer associated data first (missions, enrollments, etc.)
+  await transferAssociatedData(oldId, newId);
+
+  // 2. Create the new user document and delete the old one atomically
+  await adminDb.runTransaction(async (transaction) => {
+    transaction.set(newRef, dataToCopy);
+    transaction.delete(oldRef);
   });
+}
 
-  let batch = adminDb.batch();
-  let batchCount = 0;
+/**
+ * Merges a legacy user record into an existing target record.
+ */
+async function mergeUserRecord(oldId: string, newId: string) {
+  const oldRef = adminDb.collection("users").doc(oldId);
+  
+  // 1. Transfer associated data to the existing target
+  await transferAssociatedData(oldId, newId);
+  
+  // 2. Delete the old record
+  await oldRef.delete();
+}
 
-  for (const key in groups) {
-    const group = groups[key];
-    
-    // Survivor Logic
-    let survivor: any = null;
-
-    if (group.length > 1) {
-      // Need to count missions for each
-      const groupWithMissions = await Promise.all(group.map(async (student) => {
-        const missionsSnap = await adminDb.collection("missions")
-          .where("studentId", "==", student.id)
-          .count()
-          .get();
-        return { ...student, missionCount: missionsSnap.data().count };
-      }));
-
-      // Sort by missionCount (desc), then createdAt (asc)
-      groupWithMissions.sort((a, b) => {
-        if (b.missionCount !== a.missionCount) return b.missionCount - a.missionCount;
-        const dateA = new Date(a.createdAt || 0).getTime();
-        const dateB = new Date(b.createdAt || 0).getTime();
-        return dateA - dateB;
-      });
-
-      survivor = groupWithMissions[0];
-      const duplicates = groupWithMissions.slice(1);
-
-      for (const dup of duplicates) {
-        batch.delete(adminDb.collection("users").doc(dup.id));
-        report.duplicatesRemoved++;
-        batchCount++;
+/**
+ * Transfers missions, applications, and enrollments from one studentId to another.
+ */
+async function transferAssociatedData(oldId: string, newId: string) {
+  const batchSize = 450;
+  
+  // 1. Missions
+  const missionsSnap = await adminDb.collection("missions").where("studentId", "==", oldId).get();
+  if (!missionsSnap.empty) {
+    let batch = adminDb.batch();
+    let count = 0;
+    for (const doc of missionsSnap.docs) {
+      batch.update(doc.ref, { studentId: newId });
+      count++;
+      if (count >= batchSize) {
+        await batch.commit();
+        batch = adminDb.batch();
+        count = 0;
       }
-    } else {
-      survivor = group[0];
     }
-
-    // Normalization Logic: Ensure document ID is composite
-    const expectedId = `${survivor.franquiaId}_${survivor.codigo}`;
-    if (survivor.id !== expectedId && survivor.franquiaId !== "pendente_revisao" && survivor.codigo !== "sem_codigo") {
-      // Migrate document
-      const oldRef = adminDb.collection("users").doc(survivor.id);
-      const newRef = adminDb.collection("users").doc(expectedId);
-
-      // Copy data
-      const { id, ...dataToCopy } = survivor;
-      // Add legacyUid to keep link to Auth if needed
-      dataToCopy.legacyUid = survivor.id;
-      dataToCopy.franquiaId = String(dataToCopy.franquiaId);
-      dataToCopy.codigo = String(dataToCopy.codigo);
-
-      batch.set(newRef, dataToCopy);
-      batch.delete(oldRef);
-      
-      // Update missions studentId
-      const missionsToUpdate = await adminDb.collection("missions")
-        .where("studentId", "==", survivor.id)
-        .get();
-      
-      for (const mDoc of missionsToUpdate.docs) {
-        batch.update(mDoc.ref, { studentId: expectedId });
-        batchCount++;
-        if (batchCount >= 450) {
-          await batch.commit();
-          batch = adminDb.batch();
-          batchCount = 0;
-        }
-      }
-
-      // Update applications studentId
-      const appsToUpdate = await adminDb.collection("applications")
-        .where("studentId", "==", survivor.id)
-        .get();
-      
-      for (const aDoc of appsToUpdate.docs) {
-        batch.update(aDoc.ref, { studentId: expectedId });
-        batchCount++;
-        if (batchCount >= 450) {
-          await batch.commit();
-          batch = adminDb.batch();
-          batchCount = 0;
-        }
-      }
-
-      // Move enrollments sub-collection
-      const enrollmentsSnap = await oldRef.collection("enrollments").get();
-      for (const eDoc of enrollmentsSnap.docs) {
-        batch.set(newRef.collection("enrollments").doc(eDoc.id), eDoc.data());
-        batch.delete(eDoc.ref);
-        batchCount += 2;
-        if (batchCount >= 450) {
-          await batch.commit();
-          batch = adminDb.batch();
-          batchCount = 0;
-        }
-      }
-
-      report.normalized++;
-      // No need to add to batchCount here, it's already handled in loops
-    } else {
-      // Just ensure fields are strings
-      batch.update(adminDb.collection("users").doc(survivor.id), {
-        franquiaId: String(survivor.franquiaId || "pendente_revisao"),
-        codigo: String(survivor.codigo || "sem_codigo")
-      });
-      batchCount++;
-    }
-
-    // Commit batch if it gets too large
-    if (batchCount >= 450) {
-      await batch.commit();
-      batch = adminDb.batch();
-      batchCount = 0;
-    }
+    if (count > 0) await batch.commit();
   }
 
-  // Final commit
-  if (batchCount > 0) {
-    await batch.commit();
+  // 2. Applications
+  const appsSnap = await adminDb.collection("applications").where("studentId", "==", oldId).get();
+  if (!appsSnap.empty) {
+    let batch = adminDb.batch();
+    let count = 0;
+    for (const doc of appsSnap.docs) {
+      batch.update(doc.ref, { studentId: newId });
+      count++;
+      if (count >= batchSize) {
+        await batch.commit();
+        batch = adminDb.batch();
+        count = 0;
+      }
+    }
+    if (count > 0) await batch.commit();
   }
 
-  return NextResponse.json({ 
-    message: "Saneamento concluído com sucesso",
-    report 
-  });
+  // 3. Enrollments (Sub-collection)
+  const enrollmentsSnap = await adminDb.collection("users").doc(oldId).collection("enrollments").get();
+  if (!enrollmentsSnap.empty) {
+    // Fetch target enrollments to avoid duplicates
+    const targetEnrollmentsSnap = await adminDb.collection("users").doc(newId).collection("enrollments").get();
+    const targetEnrollmentIds = new Set(targetEnrollmentsSnap.docs.map(d => d.id));
+
+    let batch = adminDb.batch();
+    let count = 0;
+    for (const doc of enrollmentsSnap.docs) {
+      if (!targetEnrollmentIds.has(doc.id)) {
+        batch.set(adminDb.collection("users").doc(newId).collection("enrollments").doc(doc.id), doc.data());
+        count++;
+      }
+      batch.delete(doc.ref);
+      count++;
+      
+      if (count >= batchSize) {
+        await batch.commit();
+        batch = adminDb.batch();
+        count = 0;
+      }
+    }
+    if (count > 0) await batch.commit();
+  }
 }
