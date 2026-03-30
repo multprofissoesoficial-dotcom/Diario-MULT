@@ -169,6 +169,13 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
       const userRef = doc(db, "users", profile.uid);
       const courseId = activeEnrollment?.courseId || "INF";
       
+      // Senior Audit: Prevent frontend writes to legacy profiles
+      if (profile.uid === auth.currentUser?.uid) {
+        console.warn("Legacy profile detected. Skipping badge update to avoid permission errors.");
+        setNewBadge(newBadges[0]);
+        return;
+      }
+      
       await updateDoc(userRef, {
         unlockedBadges: arrayUnion(...newBadges.map(b => b.id))
       });
@@ -201,7 +208,13 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
         feedback = "Excelente registro! Vi que você dominou habilidades cruciais hoje. Continue assim!";
       }
 
-      try {
+      if (profile.uid === auth.currentUser?.uid) {
+      alert("Seu perfil está em modo de compatibilidade (Legado). Por favor, aguarde a migração automática ou procure o suporte para atualizar seus dados.");
+      setUploadingProfile(false);
+      return;
+    }
+
+    try {
           const courseId = activeEnrollment?.courseId || "INF";
           const courseName = activeEnrollment?.courseName || "Informática Profissional";
           const absLesson = getAbsoluteLessonId(module, classNum);
@@ -221,8 +234,8 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
             createdAt: new Date().toISOString(),
           });
 
-          // Update currentLesson in enrollment
-          if (activeEnrollment && absLesson > activeEnrollment.currentLesson) {
+          // Update currentLesson in enrollment - ONLY if not legacy
+          if (activeEnrollment && absLesson > activeEnrollment.currentLesson && profile.uid !== auth.currentUser?.uid) {
             await updateDoc(doc(db, "users", profile.uid, "enrollments", courseId), {
               currentLesson: absLesson
             });
@@ -242,6 +255,11 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
 
   const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (profile.uid === auth.currentUser?.uid) {
+      alert("Seu perfil está em modo de compatibilidade (Legado). Por favor, aguarde a migração automática ou procure o suporte para atualizar seus dados.");
+      setUploadingProfile(false);
+      return;
+    }
     setUploadingProfile(true);
     try {
       let resumeUrl = profile.resumeUrl || "";
@@ -315,6 +333,10 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
 
   const handleAcceptTerms = async () => {
     if (!acceptTerms) return;
+    if (profile.uid === auth.currentUser?.uid) {
+      alert("Seu perfil está em modo de compatibilidade (Legado). Por favor, aguarde a migração automática.");
+      return;
+    }
     setLoadingTerms(true);
     try {
       await updateDoc(doc(db, "users", profile.uid), {
@@ -397,6 +419,10 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
             <select 
               value={profile.currentCourseId}
               onChange={async (e) => {
+                if (profile.uid === auth.currentUser?.uid) {
+                  alert("Seu perfil está em modo de compatibilidade (Legado).");
+                  return;
+                }
                 await updateDoc(doc(db, "users", profile.uid), {
                   currentCourseId: e.target.value
                 });

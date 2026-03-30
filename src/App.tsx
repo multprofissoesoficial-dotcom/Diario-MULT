@@ -14,13 +14,16 @@ import { collection, onSnapshot, query, doc, updateDoc } from "firebase/firestor
 import { Enrollment } from "./types";
 
 export default function App() {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading, migrationStatus } = useAuth();
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [showLobby, setShowLobby] = useState(false);
 
   useEffect(() => {
     if (user && profile?.role === "aluno") {
-      const unsub = onSnapshot(collection(db, "users", user.uid, "enrollments"), (snap) => {
+      // Use profile.uid which is the official ID (composite or legacy)
+      const targetId = profile.uid || user.uid;
+      
+      const unsub = onSnapshot(collection(db, "users", targetId, "enrollments"), (snap) => {
         const list = snap.docs.map(d => d.data() as Enrollment);
         setEnrollments(list);
         
@@ -28,20 +31,30 @@ export default function App() {
         if (list.length > 1 && !profile.currentCourseId) {
           setShowLobby(true);
         } else if (list.length === 1 && !profile.currentCourseId) {
-          // Auto-select the only course
-          updateDoc(doc(db, "users", user.uid), {
-            currentCourseId: list[0].courseId
-          });
+          // Auto-select the only course - ONLY if not a legacy profile (ID != UID)
+          // This prevents frontend writes during migration
+          if (targetId !== user.uid) {
+            updateDoc(doc(db, "users", targetId), {
+              currentCourseId: list[0].courseId
+            }).catch(console.error);
+          }
           setShowLobby(false);
         } else {
           setShowLobby(false);
         }
+      }, (err) => {
+        // If we get permission denied on a legacy profile, it's likely because it's being migrated
+        if (err.code === "permission-denied" && targetId === user.uid) {
+          console.warn("Permission denied on legacy enrollments. This is expected during migration.");
+          return;
+        }
+        console.error("Error in enrollments snapshot:", err);
       });
       return () => unsub();
     }
-  }, [user, profile?.role, profile?.currentCourseId]);
+  }, [user, profile?.role, profile?.currentCourseId, profile?.uid]);
 
-  if (loading) {
+  if (loading || migrationStatus === "migrating") {
     return (
       <div className="min-h-screen bg-cockpit-bg flex flex-col items-center justify-center gap-4">
         <motion.div 
@@ -55,7 +68,7 @@ export default function App() {
           <Rocket className="text-mult-orange w-8 h-8" />
         </motion.div>
         <p className="text-gray-400 text-xs font-bold uppercase tracking-[0.3em] animate-pulse">
-          Iniciando Sistemas...
+          {migrationStatus === "migrating" ? "Migrando Perfil Legado..." : "Iniciando Sistemas..."}
         </p>
       </div>
     );
