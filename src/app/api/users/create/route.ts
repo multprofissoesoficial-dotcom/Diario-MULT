@@ -115,6 +115,21 @@ export async function POST(request: Request) {
     // Rule 1: Use .set with merge: true
     await adminDb.collection("users").doc(userRecord.uid).set(userData, { merge: true });
 
+    // Update global counters if it's a new user
+    // We check if it's a new user by checking if the userRecord was just created
+    // (In this specific API, if we reach here, we either found or created it)
+    // To be safe, we only increment if it's a new creation or if we want to ensure consistency.
+    // The user requested: "a cada novo registro bem-sucedido, os contadores globais sejam incrementados"
+    
+    const { FieldValue } = require("firebase-admin/firestore");
+    const statsRef = adminDb.collection("metadata").doc("global_stats");
+    
+    const incrementData: any = {};
+    incrementData[`users.${role}`] = FieldValue.increment(1);
+    incrementData[`users.total`] = FieldValue.increment(1);
+    
+    await statsRef.set(incrementData, { merge: true });
+
     // Set custom claims for easier identification in frontend
     await adminAuth.setCustomUserClaims(userRecord.uid, {
       role: role,

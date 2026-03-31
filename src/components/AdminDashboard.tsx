@@ -111,6 +111,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [cleanupReport, setCleanupReport] = useState<any>(null);
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [showCleanupConfirm, setShowCleanupConfirm] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
   const [allMissions, setAllMissions] = useState<Mission[]>([]);
   const [lastMissionDoc, setLastMissionDoc] = useState<any>(null);
   const [hasMoreMissions, setHasMoreMissions] = useState(true);
@@ -197,6 +198,33 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       unsubCourses();
     };
   }, []);
+
+  useEffect(() => {
+    // Listen to Global Stats Metadata
+    if (profile.role === "master" && selectedFranquia === "all") {
+      const unsubStats = onSnapshot(doc(db, "metadata", "global_stats"), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          setCounts(prev => ({
+            ...prev,
+            users: {
+              ...prev.users,
+              ...data.users
+            },
+            missions: {
+              ...prev.missions,
+              ...data.missions
+            },
+            ats: {
+              ...prev.ats,
+              ...data.ats
+            }
+          }));
+        }
+      });
+      return () => unsubStats();
+    }
+  }, [selectedFranquia, profile.role]);
 
   useEffect(() => {
     // Initial fetch of users
@@ -793,6 +821,32 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       setLoading(false);
     }
   };
+  const handleRunSyncCounters = async () => {
+    setSyncLoading(true);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const response = await fetch("/api/maintenance/sync-counters", {
+        method: "POST",
+        headers: { 
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao sincronizar contadores");
+      }
+
+      setSuccessMsg("Contadores sincronizados com sucesso!");
+      setTimeout(() => setSuccessMsg(""), 3000);
+    } catch (err: any) {
+      alert("Erro ao sincronizar: " + err.message);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
   const handleRunMaintenance = async () => {
     setMaintenanceLoading(true);
     setMaintenanceReport(null);
@@ -1343,6 +1397,37 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                       <Trash2 className="w-5 h-5" />
                     )}
                     Remover Rastros de Migração
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="glass-card p-8 border-neon-blue/20 bg-neon-blue/5">
+            <div className="flex items-start gap-6">
+              <div className="w-16 h-16 rounded-2xl bg-neon-blue/20 flex items-center justify-center text-neon-blue shrink-0 border border-neon-blue/30">
+                <Users className="w-8 h-8" />
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Sincronização de Contadores</h2>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Recalcula todos os contadores globais (Alunos, Professores, Missões, etc.) percorrendo a base de dados.
+                  </p>
+                </div>
+                
+                <div className="pt-4 flex items-center gap-4">
+                  <button
+                    onClick={handleRunSyncCounters}
+                    disabled={syncLoading}
+                    className="bg-neon-blue hover:bg-neon-blue/80 text-black font-black py-4 px-8 rounded-xl transition-all neon-glow-blue text-xs uppercase tracking-widest flex items-center gap-3 disabled:opacity-50"
+                  >
+                    {syncLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-5 h-5" />
+                    )}
+                    Sincronizar Contadores Globais
                   </button>
                 </div>
               </div>

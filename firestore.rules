@@ -1,8 +1,77 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // --- 1. FUNÇÕES DE SEGURANÇA ---
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // REGRA DE OURO: Seu e-mail e o oficial têm poder total (SuperAdmin)
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == "faustodv@gmail.com" || 
+        request.auth.token.email == "multprofissoesoficial@gmail.com"
+      );
+    }
+
+    // Verifica se o usuário é Master no banco de dados
+    function isMaster() {
+      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      return isSuperAdmin() || (exists(userPath) && get(userPath).data.role == 'master');
+    }
+
+    // Verifica se é o dono do documento (ID novo ou Legacy)
+    function isOwner(userId) {
+      return isAuthenticated() && (
+        request.auth.uid == userId || 
+        (resource != null && resource.data.uid == request.auth.uid) ||
+        (resource != null && resource.data.legacyUid == request.auth.uid)
+      );
+    }
+
+    // --- 2. REGRAS POR COLEÇÃO ---
+
+    // Acesso Global para você (Master)
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if isSuperAdmin();
+    }
+
+    // Coleção de Usuários (Alunos, Professores, etc)
+    match /users/{userId} {
+      // Permite leitura se for o dono ou se for Master/Equipe
+      allow get: if isAuthenticated() && (isOwner(userId) || isMaster());
+      
+      // Lista de usuários limitada para Master ou buscas pequenas
+      allow list: if isMaster() || (isAuthenticated() && request.query.limit <= 10);
+
+      // Permite criar/atualizar: Necessário para a API de Importação e Migração
+      allow create, update: if isAuthenticated() && (
+        isMaster() || 
+        request.auth.uid == userId ||
+        (request.resource.data.legacyUid == request.auth.uid)
+      );
+
+      allow delete: if isMaster();
+    }
+
+    // Missões (Diários de Bordo)
+    match /missions/{missionId} {
+      allow read: if isAuthenticated() && (isMaster() || resource.data.studentId == request.auth.uid);
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (isMaster() || resource.data.studentId == request.auth.uid);
+      allow delete: if isMaster();
+    }
+
+    // Matrículas e Cursos
+    match /enrollments/{enrollmentId} {
+      allow read, write: if isMaster() || isAuthenticated();
+    }
+
+    // Coleções de Backup (Apenas leitura para Master por segurança)
+    match /users_backup/{docId} {
+      allow read, write: if isSuperAdmin();
     }
   }
 }

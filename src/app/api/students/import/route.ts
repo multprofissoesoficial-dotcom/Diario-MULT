@@ -187,6 +187,14 @@ export async function POST(request: Request) {
 
           await newUserRef.set(studentData);
           
+          // Update global counters for new student
+          const { FieldValue } = require("firebase-admin/firestore");
+          const statsRef = adminDb.collection("metadata").doc("global_stats");
+          await statsRef.set({
+            "users.aluno": FieldValue.increment(1),
+            "users.total": FieldValue.increment(1)
+          }, { merge: true });
+
           // Add initial enrollment
           await newUserRef.collection("enrollments").doc(courseId).set({
             courseId,
