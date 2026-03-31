@@ -263,11 +263,11 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     // Listen to Franquias
     const unsubFranquias = onSnapshot(collection(db, "franquias"), (snap) => {
       setFranquias(snap.docs.map(d => d.data() as Franquia));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, "franquias"));
 
     const unsubCourses = onSnapshot(collection(db, "courses"), (snap) => {
       setCourses(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, "courses"));
 
     return () => {
       unsubFranquias();
@@ -297,7 +297,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             }
           }));
         }
-      });
+      }, (err) => handleFirestoreError(err, OperationType.GET, "metadata/global_stats"));
       return () => unsubStats();
     }
   }, [selectedFranquia, profile.role]);
@@ -467,7 +467,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
     const unsubMissions = onSnapshot(q, (snap) => {
       setPendingMissions(snap.docs.map(d => ({ id: d.id, ...d.data() } as Mission)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, "missions"));
 
     return () => unsubMissions();
   }, [selectedFranquia, profile.franquiaId, profile.role]);

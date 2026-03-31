@@ -95,6 +95,8 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
   }, [profile.currentCourseId]);
 
   useEffect(() => {
+    if (!profile.id || profile.uid !== auth.currentUser?.uid) return;
+
     // Fetch Jobs - Multitenancy: Filter by franquiaId
     const jobsQuery = query(
       collection(db, "job_postings"), 
@@ -103,13 +105,13 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     );
     const unsubJobs = onSnapshot(jobsQuery, (snap) => {
       setJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as JobPosting)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, "job_postings"));
 
     // Fetch User Applications
     const appsQuery = query(collection(db, "applications"), where("studentId", "in", [profile.id, profile.uid]));
     const unsubApps = onSnapshot(appsQuery, (snap) => {
       setUserApplications(snap.docs.map(d => ({ id: d.id, ...d.data() } as Application)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, "applications"));
 
     return () => {
       unsubJobs();
@@ -118,6 +120,8 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
   }, [profile.id, profile.uid, profile.franquiaId]);
 
   useEffect(() => {
+    if (!profile.id || profile.uid !== auth.currentUser?.uid) return;
+
     const enrollmentsRef = collection(db, "users", profile.id, "enrollments");
     const unsubEnrollments = onSnapshot(enrollmentsRef, (snap) => {
       const list = snap.docs.map(d => d.data() as Enrollment);
@@ -131,12 +135,14 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
         setModule(m);
         setClassNum(l);
       }
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, `users/${profile.id}/enrollments`));
 
     return () => unsubEnrollments();
   }, [profile.id, profile.uid, profile.currentCourseId]);
 
   useEffect(() => {
+    if (!profile.id || profile.uid !== auth.currentUser?.uid) return;
+
     const q = query(
       collection(db, "missions"),
       where("studentId", "in", [profile.id, profile.uid])

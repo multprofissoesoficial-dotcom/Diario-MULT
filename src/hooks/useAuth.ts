@@ -32,18 +32,43 @@ export function useAuth() {
     const fetchProfile = async () => {
       setLoading(true);
       try {
-        // ABSOLUTE STANDARD: Always search by 'uid' field. 
-        // Never use doc(db, "users", user.uid) directly to avoid duplicate document logic.
-        const q = query(collection(db, "users"), where("uid", "==", user.uid), limit(1));
-        const querySnap = await getDocs(q);
-        
-        if (!querySnap.empty) {
-          const snap = querySnap.docs[0];
-          const data = snap.data() as UserProfile;
-          const docId = snap.id;
+        // 1. Try to construct compositeId from email (standard for students)
+        const email = user.email || "";
+        const [prefix, fullDomain] = email.split('@');
+        const domain = fullDomain ? fullDomain.split('.')[0] : "";
+        const compositeId = (prefix && domain && domain !== 'gmail' && domain !== 'outlook' && domain !== 'hotmail') 
+          ? `${domain}_${prefix}` 
+          : null;
 
+        let targetDocId: string | null = null;
+
+        if (compositeId) {
+          const docRef = doc(db, "users", compositeId);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            targetDocId = compositeId;
+            
+            // HANDSHAKE: If UID is missing or different, update it
+            const data = docSnap.data();
+            if (data.uid !== user.uid) {
+              console.log(`Handshake: Updating UID for ${compositeId}`);
+              await updateDoc(docRef, { uid: user.uid });
+            }
+          }
+        }
+
+        // 2. Fallback: Search by UID field (for Master/Staff or legacy accounts)
+        if (!targetDocId) {
+          const q = query(collection(db, "users"), where("uid", "==", user.uid), limit(1));
+          const querySnap = await getDocs(q);
+          if (!querySnap.empty) {
+            targetDocId = querySnap.docs[0].id;
+          }
+        }
+
+        if (targetDocId) {
           // Set up real-time listener on the FOUND document
-          unsubProfile = onSnapshot(doc(db, "users", docId), (s) => {
+          unsubProfile = onSnapshot(doc(db, "users", targetDocId), (s) => {
             if (s.exists()) {
               const profileData = { ...s.data() as UserProfile, id: s.id };
               setProfile(profileData);
@@ -56,7 +81,7 @@ export function useAuth() {
               const now = new Date().getTime();
               const lastLoginTime = profileData.lastLogin?.seconds ? profileData.lastLogin.seconds * 1000 : 0;
               if (now - lastLoginTime > 24 * 60 * 60 * 1000) {
-                updateDoc(doc(db, "users", docId), { lastLogin: serverTimestamp() }).catch(console.error);
+                updateDoc(doc(db, "users", targetDocId!), { lastLogin: serverTimestamp() }).catch(console.error);
               }
               setLoading(false);
             } else {
@@ -69,7 +94,7 @@ export function useAuth() {
             setLoading(false);
           });
         } else {
-          console.warn("No profile found for user UID:", user.uid);
+          console.warn("No profile found for user:", user.email || user.uid);
           setProfile(null);
           setLoading(false);
         }

@@ -153,7 +153,7 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
     
     unsubFranquias = onSnapshot(qFranquias, (snap) => {
       setFranquias(snap.docs.map(d => d.data() as Franquia));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, "franquias"));
 
     const qApps = profile.role === "master" 
       ? query(collection(db, "applications"))

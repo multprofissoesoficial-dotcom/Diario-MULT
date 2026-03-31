@@ -59,7 +59,7 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
     const unsubscribe = onSnapshot(q, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Course));
       setCourses(list);
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, "courses"));
     return () => unsubscribe();
   }, []);
 
