@@ -122,6 +122,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [dateFilter, setDateFilter] = useState({ start: "", end: "" });
   const [activitySearch, setActivitySearch] = useState("");
   const [activityStatusFilter, setActivityStatusFilter] = useState<string>("all");
+  const [resolvedUsers, setResolvedUsers] = useState<Record<string, UserProfile>>({});
 
   // Global Counts
   const [counts, setCounts] = useState({
@@ -445,6 +446,48 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
+  useEffect(() => {
+    const resolveMissionsStudents = async () => {
+      const uniqueStudentIds = Array.from(new Set(allMissions.map(m => m.studentId).filter(Boolean)));
+      const missingIds = uniqueStudentIds.filter(id => !resolvedUsers[id]);
+
+      if (missingIds.length === 0) return;
+
+      const newResolved = { ...resolvedUsers };
+      
+      const batches = [];
+      for (let i = 0; i < missingIds.length; i += 30) {
+        batches.push(missingIds.slice(i, i + 30));
+      }
+
+      for (const batch of batches) {
+        // 1. Try fetching by document ID
+        const qId = query(collection(db, "users"), where("__name__", "in", batch));
+        const snapId = await getDocs(qId);
+        snapId.docs.forEach(d => {
+          const data = d.data() as UserProfile;
+          newResolved[d.id] = data;
+          newResolved[data.uid] = data;
+        });
+
+        // 2. Try fetching by uid field (for legacy missions)
+        const qUid = query(collection(db, "users"), where("uid", "in", batch));
+        const snapUid = await getDocs(qUid);
+        snapUid.docs.forEach(d => {
+          const data = d.data() as UserProfile;
+          newResolved[data.uid] = data;
+          newResolved[d.id] = data;
+        });
+      }
+
+      setResolvedUsers(newResolved);
+    };
+
+    if (allMissions.length > 0) {
+      resolveMissionsStudents();
+    }
+  }, [allMissions]);
+
   const loadMoreMissions = () => {
     if (!loading && hasMoreMissions) {
       fetchMissions();
@@ -520,7 +563,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (u.codigo && u.codigo.includes(searchQuery));
     
-    const matchesPending = !pendingOnly || pendingMissions.some(m => m.studentId === u.uid);
+    const matchesPending = !pendingOnly || pendingMissions.some(m => m.studentId === u.id || m.studentId === u.uid);
     
     return matchesSearch && matchesPending;
   });
@@ -795,14 +838,18 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       return matchesSearch && matchesStatus && matchesDate;
     });
 
-    const csvData = filteredMissions.map(m => ({
-      "Aluno": m.studentName,
-      "Atividade": getRelativeLesson(m.classNum).label,
-      "Data": m.createdAt ? new Date(m.createdAt).toLocaleDateString("pt-BR") : "N/A",
-      "Status": m.status === "approved" ? "Aprovado" : m.status === "pending" ? "Pendente" : m.status === "bonus" ? "Bônus" : "Rejeitado",
-      "XP": m.xpAwarded || 0,
-      "Unidade": franquias.find(f => f.id === m.franquiaId)?.nome || "N/A"
-    }));
+    const csvData = filteredMissions.map(m => {
+      const student = resolvedUsers[m.studentId];
+      return {
+        "Aluno": student?.displayName || m.studentName,
+        "Código": student?.codigo || "N/A",
+        "Atividade": getRelativeLesson(m.classNum).label,
+        "Data": m.createdAt ? new Date(m.createdAt).toLocaleDateString("pt-BR") : "N/A",
+        "Status": m.status === "approved" ? "Aprovado" : m.status === "pending" ? "Pendente" : m.status === "bonus" ? "Bônus" : "Rejeitado",
+        "XP": m.xpAwarded || 0,
+        "Unidade": franquias.find(f => f.id === m.franquiaId)?.nome || "N/A"
+      };
+    });
 
     const csv = Papa.unparse(csvData);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -1656,7 +1703,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             <tbody className="divide-y divide-white/5">
               {currentUsers.map((userItem) => {
                 const rank = RANKS.reduce((prev, curr) => (userItem.xp >= curr.minXP ? curr : prev), RANKS[0]);
-                const hasPending = pendingMissions.some(m => m.studentId === userItem.uid);
+                const hasPending = pendingMissions.some(m => m.studentId === userItem.id || m.studentId === userItem.uid);
                 return (
                   <tr key={userItem.uid} className="hover:bg-white/5 transition-colors group">
                     <td className="px-4 sm:px-6 py-4">
@@ -1741,11 +1788,10 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             </tbody>
           </table>
 
-          {/* Mobile Card List */}
           <div className="md:hidden divide-y divide-white/5">
             {currentUsers.map((userItem) => {
               const rank = RANKS.reduce((prev, curr) => (userItem.xp >= curr.minXP ? curr : prev), RANKS[0]);
-              const hasPending = pendingMissions.some(m => m.studentId === userItem.uid);
+              const hasPending = pendingMissions.some(m => m.studentId === userItem.id || m.studentId === userItem.uid);
               return (
                 <div key={userItem.uid} className="p-4 space-y-4">
                   <div className="flex items-center gap-3">
@@ -1979,7 +2025,14 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                 {filteredMissions.map((mission) => (
                   <tr key={mission.id} className="hover:bg-white/5 transition-colors group">
                     <td className="px-6 py-4">
-                      <p className="font-bold text-xs sm:text-sm">{mission.studentName}</p>
+                      <p className="font-bold text-xs sm:text-sm">
+                        {resolvedUsers[mission.studentId]?.displayName || mission.studentName}
+                        {resolvedUsers[mission.studentId]?.codigo && (
+                          <span className="text-[10px] text-gray-500 ml-2 font-mono bg-white/5 px-1.5 py-0.5 rounded border border-white/5">
+                            {resolvedUsers[mission.studentId].codigo}
+                          </span>
+                        )}
+                      </p>
                     </td>
                     <td className="px-6 py-4">
                       <p className="text-xs font-medium text-gray-300">{getRelativeLesson(mission.classNum).label}</p>

@@ -33,7 +33,7 @@ export default function MissionHistoryModal({ student, onClose }: MissionHistory
       try {
         const q = query(
           collection(db, "missions"),
-          where("studentId", "==", student.uid),
+          where("studentId", "in", [student.id, student.uid]),
           orderBy("createdAt", "desc"),
           limit(50)
         );
