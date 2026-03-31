@@ -126,6 +126,18 @@ export async function POST(request: Request) {
               turma: turma || userData.turma || "024inf"
             });
 
+            // FORCE PASSWORD UPDATE in Firebase Auth for re-imported students
+            if (userData.uid) {
+              try {
+                await adminAuth.updateUser(userData.uid, {
+                  password: senha || String(codigo) || "nome123"
+                });
+                console.log(`Password updated for existing student: ${userData.uid}`);
+              } catch (authErr) {
+                console.error(`Error updating password for student ${userData.uid}:`, authErr);
+              }
+            }
+
             // Add/Update enrollment
             const enrollmentRef = userRef.collection("enrollments").doc(courseId);
             const enrollmentSnap = await enrollmentRef.get();
@@ -163,6 +175,18 @@ export async function POST(request: Request) {
             } else {
               throw authErr;
             }
+          }
+
+          // If user was found but not created, we still want to update the password as per request
+          if (userRecord && !userRef) {
+             try {
+                await adminAuth.updateUser(userRecord.uid, {
+                  password: senha || String(codigo) || "nome123"
+                });
+                console.log(`Password updated for found Auth user: ${userRecord.uid}`);
+              } catch (authErr) {
+                console.error(`Error updating password for Auth user ${userRecord.uid}:`, authErr);
+              }
           }
 
           // Use compositeId as the DOCUMENT ID, but store the Auth UID inside

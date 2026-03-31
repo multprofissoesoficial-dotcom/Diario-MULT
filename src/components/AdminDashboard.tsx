@@ -88,6 +88,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [importText, setImportText] = useState("");
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [showEditUser, setShowEditUser] = useState<UserProfile | null>(null);
+  const [showResetPasswordModal, setShowResetPasswordModal] = useState<UserProfile | null>(null);
+  const [newPasswordForReset, setNewPasswordForReset] = useState("");
   const [showMissionHistory, setShowMissionHistory] = useState<UserProfile | null>(null);
   const [showAddFranquia, setShowAddFranquia] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -452,7 +454,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const totalCoordenadores = users.filter(u => u.role === "coordenador").length;
   const avgXP = totalAlunos > 0 ? Math.round(users.filter(u => u.role === "aluno").reduce((acc, curr) => acc + (curr.xp || 0), 0) / totalAlunos) : 0;
 
-  const handleResetPassword = async (email: string) => {
+  const handleSendResetEmail = async (email: string) => {
     if (!window.confirm(`Deseja enviar um e-mail de redefinição de senha para ${email}?`)) return;
     
     try {
@@ -462,6 +464,48 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     } catch (error: any) {
       console.error("Erro ao enviar reset:", error);
       alert("Erro ao enviar e-mail: " + error.message);
+    }
+  };
+
+  const handleMasterResetPassword = async () => {
+    if (!showResetPasswordModal || !newPasswordForReset) return;
+    
+    if (newPasswordForReset.length < 6) {
+      alert("A senha deve ter pelo menos 6 caracteres.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const response = await fetch("/api/users/reset-password", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ 
+          uid: showResetPasswordModal.uid,
+          newPassword: newPasswordForReset
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao redefinir senha");
+      }
+
+      setSuccessMsg("Senha redefinida com sucesso!");
+      setTimeout(() => {
+        setShowResetPasswordModal(null);
+        setNewPasswordForReset("");
+        setSuccessMsg("");
+      }, 2000);
+    } catch (err: any) {
+      console.error("Erro ao redefinir senha:", err);
+      alert("Erro ao redefinir senha: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1606,9 +1650,9 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                           </button>
                         )}
                         <button 
-                          onClick={() => handleResetPassword(userItem.email)}
+                          onClick={() => setShowResetPasswordModal(userItem)}
                           className="p-1.5 sm:p-2 rounded-lg bg-white/5 hover:bg-mult-orange/20 hover:text-mult-orange transition-all text-gray-600"
-                          title="Redefinir Senha"
+                          title="Redefinir Senha Manualmente"
                         >
                           <LockIcon className="w-3.5 h-3.5 sm:w-4 h-4" />
                         </button>
@@ -1690,8 +1734,9 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                       </button>
                     )}
                     <button 
-                      onClick={() => handleResetPassword(userItem.email)}
+                      onClick={() => setShowResetPasswordModal(userItem)}
                       className="p-2 rounded-lg bg-white/5 text-gray-400"
+                      title="Redefinir Senha Manualmente"
                     >
                       <LockIcon className="w-4 h-4" />
                     </button>
@@ -1940,6 +1985,69 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
       {/* Modals */}
       <AnimatePresence>
+        {showResetPasswordModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="glass-card max-w-md w-full p-8 border-mult-orange/50"
+            >
+              <div className="flex flex-col items-center text-center space-y-6">
+                <div className="w-20 h-20 rounded-full bg-mult-orange/20 flex items-center justify-center text-mult-orange border-4 border-mult-orange/30">
+                  <LockIcon className="w-10 h-10" />
+                </div>
+                <div className="w-full">
+                  <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Redefinir Senha</h3>
+                  <p className="text-gray-400 text-sm mt-2">
+                    Defina uma nova senha para <span className="text-white font-bold">{showResetPasswordModal.displayName}</span>
+                  </p>
+                </div>
+                
+                <div className="w-full space-y-4">
+                  <div className="space-y-1 text-left">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Nova Senha</label>
+                    <input 
+                      type="password"
+                      value={newPasswordForReset}
+                      onChange={(e) => setNewPasswordForReset(e.target.value)}
+                      placeholder="Mínimo 6 caracteres"
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-mult-orange transition-all"
+                    />
+                  </div>
+
+                  {successMsg && (
+                    <div className="bg-green-500/10 border border-green-500/20 p-4 rounded-xl">
+                      <p className="text-xs text-green-400 font-bold">{successMsg}</p>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col w-full gap-3">
+                    <button
+                      onClick={handleMasterResetPassword}
+                      disabled={loading || !newPasswordForReset}
+                      className="w-full bg-mult-orange hover:bg-mult-orange/80 text-white font-black py-4 rounded-xl transition-all neon-glow-orange text-xs uppercase tracking-widest flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Confirmar Nova Senha"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowResetPasswordModal(null);
+                        setNewPasswordForReset("");
+                        setSuccessMsg("");
+                      }}
+                      disabled={loading}
+                      className="w-full bg-white/5 hover:bg-white/10 text-gray-400 font-black py-4 rounded-xl transition-all text-xs uppercase tracking-widest"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {showMaintenanceConfirm && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <motion.div 
