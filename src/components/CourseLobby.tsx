@@ -16,7 +16,7 @@ interface CourseLobbyProps {
 export default function CourseLobby({ profile, enrollments, onSelect }: CourseLobbyProps) {
   const handleSelect = async (courseId: string) => {
     try {
-      await updateDoc(doc(db, "users", profile.uid), {
+      await updateDoc(doc(db, "users", profile.id), {
         currentCourseId: courseId
       });
       onSelect(courseId);

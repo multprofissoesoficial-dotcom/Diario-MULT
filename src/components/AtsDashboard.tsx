@@ -12,6 +12,7 @@ import {
   orderBy,
   getDoc,
   getDocs,
+  limit,
   arrayUnion,
   serverTimestamp
 } from "firebase/firestore";
@@ -86,7 +87,8 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
       // Fetch enrollments
       const fetchEnrollments = async () => {
         try {
-          const snap = await getDocs(collection(db, "users", selectedCandidate.studentId, "enrollments"));
+          if (!selectedCandidate.student?.id) return;
+          const snap = await getDocs(collection(db, "users", selectedCandidate.student.id, "enrollments"));
           setCandidateEnrollments(snap.docs.map(d => d.data() as Enrollment));
         } catch (error) {
           console.error("Error fetching candidate enrollments:", error);
@@ -260,7 +262,7 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
         notes: withdrawalReason || ""
       };
 
-      await updateDoc(doc(db, "users", app.studentId), {
+      await updateDoc(doc(db, "users", app.student.id), {
         availabilityStatus,
         withdrawalReason: withdrawalReason || app.student.withdrawalReason || "",
         employmentHistory: arrayUnion(employmentEntry)
@@ -290,9 +292,12 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
   const updateStudentPerceptions = async (studentId: string, rating: number, notes: string) => {
     setIsSavingCRM(true);
     try {
+      const app = applications.find(a => a.studentId === studentId);
+      if (!app || !app.student?.id) return;
+
       const sanitizedNotes = sanitizeText(notes);
       const franquiaId = profile.franquiaId || "global";
-      await updateDoc(doc(db, "users", studentId), {
+      await updateDoc(doc(db, "users", app.student.id), {
         [`perceptions.${franquiaId}`]: { rating, notes: sanitizedNotes }
       });
 
@@ -330,8 +335,11 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
   const updateWithdrawalReason = async (studentId: string, reason: string) => {
     setIsSavingCRM(true);
     try {
+      const app = applications.find(a => a.studentId === studentId);
+      if (!app || !app.student?.id) return;
+
       const sanitizedReason = sanitizeText(reason);
-      await updateDoc(doc(db, "users", studentId), {
+      await updateDoc(doc(db, "users", app.student.id), {
         withdrawalReason: sanitizedReason
       });
       
@@ -393,8 +401,10 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
       
       // Fetch student data for each application
       const appsWithStudents = await Promise.all(apps.map(async (app) => {
-        const studentDoc = await getDoc(doc(db, "users", app.studentId));
-        return { ...app, student: studentDoc.exists() ? (studentDoc.data() as UserProfile) : undefined };
+        const q = query(collection(db, "users"), where("uid", "==", app.studentId), limit(1));
+        const studentSnap = await getDocs(q);
+        const studentData = studentSnap.empty ? undefined : { ...studentSnap.docs[0].data(), id: studentSnap.docs[0].id } as UserProfile;
+        return { ...app, student: studentData };
       }));
 
       setApplications(appsWithStudents);

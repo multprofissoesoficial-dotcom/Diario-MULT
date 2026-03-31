@@ -721,14 +721,14 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     setLoading(true);
 
     try {
-      await setDoc(doc(db, "users", showEditUser.uid), showEditUser, { merge: true });
+      await setDoc(doc(db, "users", showEditUser.id), showEditUser, { merge: true });
       setSuccessMsg("Usuário atualizado com sucesso!");
       setTimeout(() => {
         setShowEditUser(null);
         setSuccessMsg("");
       }, 2000);
     } catch (err: any) {
-      handleFirestoreError(err, OperationType.WRITE, `users/${showEditUser.uid}`);
+      handleFirestoreError(err, OperationType.WRITE, `users/${showEditUser.id}`);
     } finally {
       setLoading(false);
     }
@@ -775,6 +775,16 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     const xp = bonus ? XP_BONUS : XP_PER_MISSION;
 
     try {
+      // Find the student document ID by UID
+      const q = query(collection(db, "users"), where("uid", "==", mission.studentId), limit(1));
+      const studentSnap = await getDocs(q);
+      
+      if (studentSnap.empty) {
+        throw new Error("Estudante não encontrado para esta missão.");
+      }
+      
+      const studentDocId = studentSnap.docs[0].id;
+
       await Promise.all([
         updateDoc(doc(db, "missions", mission.id), {
           status: bonus ? "bonus" : "approved",
@@ -782,7 +792,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           approvedAt: new Date().toISOString(),
           approvedBy: profile.uid
         }),
-        updateDoc(doc(db, "users", mission.studentId), {
+        updateDoc(doc(db, "users", studentDocId), {
           xp: increment(xp)
         })
       ]);
@@ -793,7 +803,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       fetchCounts(); // Refresh counts
       setSuccessMsg("Missão aprovada com sucesso!");
       setTimeout(() => setSuccessMsg(""), 3000);
-    } catch (err) {
+    } catch (err: any) {
       handleFirestoreError(err, OperationType.WRITE, `missions/${mission.id} & users/${mission.studentId}`);
     } finally {
       setLoading(false);

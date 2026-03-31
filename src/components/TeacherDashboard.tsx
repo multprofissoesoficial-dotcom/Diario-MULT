@@ -144,7 +144,7 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
       }
 
       const snap = await getDocs(q);
-      const newStudents = snap.docs.map(d => d.data() as UserProfile);
+      const newStudents = snap.docs.map(d => ({ ...d.data() as UserProfile, id: d.id }));
       
       if (reset) {
         setStudents(newStudents);
@@ -218,10 +218,10 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
     setLoading(true);
 
     try {
-      await setDoc(doc(db, "users", showEditStudent.uid), showEditStudent, { merge: true });
+      await setDoc(doc(db, "users", showEditStudent.id), showEditStudent, { merge: true });
       setShowEditStudent(null);
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `users/${showEditStudent.uid}`);
+      handleFirestoreError(err, OperationType.WRITE, `users/${showEditStudent.id}`);
     } finally {
       setLoading(false);
     }
@@ -232,13 +232,23 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
     const xp = bonus ? XP_BONUS : XP_PER_MISSION;
 
     try {
-      // Update mission status and student XP in parallel for faster real-time feedback
+      // 1. Find the student document ID by UID (mission.studentId is the UID)
+      const q = query(collection(db, "users"), where("uid", "==", mission.studentId), limit(1));
+      const querySnap = await getDocs(q);
+      
+      if (querySnap.empty) {
+        throw new Error("Estudante não encontrado para esta missão.");
+      }
+      
+      const studentDocId = querySnap.docs[0].id;
+
+      // 2. Update mission status and student XP
       await Promise.all([
         updateDoc(doc(db, "missions", mission.id), {
           status: bonus ? "bonus" : "approved",
           xpAwarded: xp
         }),
-        updateDoc(doc(db, "users", mission.studentId), {
+        updateDoc(doc(db, "users", studentDocId), {
           xp: increment(xp)
         })
       ]);

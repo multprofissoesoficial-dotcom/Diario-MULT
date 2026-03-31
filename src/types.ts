@@ -42,6 +42,7 @@ export interface EmploymentHistoryEntry {
 }
 
 export interface UserProfile {
+  id: string; // Firestore Document ID (standardized as {franquiaId}_{codigo} for students)
   uid: string;
   displayName: string;
   email: string;

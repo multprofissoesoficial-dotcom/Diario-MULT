@@ -55,7 +55,7 @@ export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
     } catch (err: any) {
       console.error("Erro de login:", err.code, err.message);
       if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
-        setError("Credenciais inválidas. Verifique sua matrícula/e-mail e senha.");
+        setError("Senha antiga detectada. Caso não consiga acessar, utilize o Esqueci minha Senha.");
       } else if (err.code === "auth/too-many-requests") {
         setError("Muitas tentativas. Tente novamente em alguns minutos.");
       } else {

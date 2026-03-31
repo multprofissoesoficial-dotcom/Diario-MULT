@@ -8,13 +8,6 @@ export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [migrationStatus, setMigrationStatus] = useState<"idle" | "migrating" | "error" | "success">("idle");
-  const migrationStatusRef = useRef<"idle" | "migrating" | "error" | "success">("idle");
-
-  // Keep ref in sync with state for use in closures
-  useEffect(() => {
-    migrationStatusRef.current = migrationStatus;
-  }, [migrationStatus]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
@@ -39,51 +32,33 @@ export function useAuth() {
     const fetchProfile = async () => {
       setLoading(true);
       try {
-        // Step 1: Try direct UID match (Standard for new users or non-migrated)
-        const docRef = doc(db, "users", user.uid);
-        const docSnap = await getDoc(docRef);
+        // ABSOLUTE STANDARD: Always search by 'uid' field. 
+        // Never use doc(db, "users", user.uid) directly to avoid duplicate document logic.
+        const q = query(collection(db, "users"), where("uid", "==", user.uid), limit(1));
+        const querySnap = await getDocs(q);
         
-        let finalDocId = "";
-        
-        if (docSnap.exists()) {
-          finalDocId = user.uid;
-        } else {
-          // Step 2: Search by 'uid' field (CRITICAL for users with legacy UIDs and standardized Doc IDs)
-          const qUid = query(collection(db, "users"), where("uid", "==", user.uid), limit(1));
-          const queryUidSnap = await getDocs(qUid);
-          
-          if (!queryUidSnap.empty) {
-            finalDocId = queryUidSnap.docs[0].id;
-          } else {
-            // Step 3: Fallback Query (Search for document with legacyUid == user.uid)
-            const qLegacy = query(collection(db, "users"), where("legacyUid", "==", user.uid), limit(1));
-            const queryLegacySnap = await getDocs(qLegacy);
-            
-            if (!queryLegacySnap.empty) {
-              finalDocId = queryLegacySnap.docs[0].id;
-            } else {
-              // Step 4: Try composite ID from claims if available
-              const tokenResult = await user.getIdTokenResult();
-              const { franquiaId, codigo } = tokenResult.claims;
-              
-              if (franquiaId && codigo) {
-                const compositeId = `${franquiaId}_${codigo}`.toLowerCase().replace(/\s+/g, "");
-                const compositeDocRef = doc(db, "users", compositeId);
-                const compositeSnap = await getDoc(compositeDocRef);
-                if (compositeSnap.exists()) {
-                  finalDocId = compositeId;
-                }
-              }
-            }
-          }
-        }
+        if (!querySnap.empty) {
+          const snap = querySnap.docs[0];
+          const data = snap.data() as UserProfile;
+          const docId = snap.id;
 
-        if (finalDocId) {
-          // Set up real-time listener on the CORRECT document
-          unsubProfile = onSnapshot(doc(db, "users", finalDocId), (snap) => {
-            if (snap.exists()) {
-              const data = snap.data() as UserProfile;
-              handleProfileData(data, finalDocId);
+          // Set up real-time listener on the FOUND document
+          unsubProfile = onSnapshot(doc(db, "users", docId), (s) => {
+            if (s.exists()) {
+              const profileData = { ...s.data() as UserProfile, id: s.id };
+              setProfile(profileData);
+              
+              // Set cookies for middleware
+              document.cookie = `user_uid=${user.uid}; path=/; max-age=86400; SameSite=None; Secure`;
+              document.cookie = `user_role=${profileData.role}; path=/; max-age=86400; SameSite=None; Secure`;
+
+              // Update lastLogin if not updated recently
+              const now = new Date().getTime();
+              const lastLoginTime = profileData.lastLogin?.seconds ? profileData.lastLogin.seconds * 1000 : 0;
+              if (now - lastLoginTime > 24 * 60 * 60 * 1000) {
+                updateDoc(doc(db, "users", docId), { lastLogin: serverTimestamp() }).catch(console.error);
+              }
+              setLoading(false);
             } else {
               setProfile(null);
               setLoading(false);
@@ -94,7 +69,7 @@ export function useAuth() {
             setLoading(false);
           });
         } else {
-          console.warn("No profile found for user:", user.uid);
+          console.warn("No profile found for user UID:", user.uid);
           setProfile(null);
           setLoading(false);
         }
@@ -110,72 +85,7 @@ export function useAuth() {
     return () => {
       if (unsubProfile) unsubProfile();
     };
-
-    async function handleProfileData(data: UserProfile, docId: string) {
-      if (!user) return;
-
-      // Senior Audit: Detect legacy profile (ID == UID) and trigger server-side migration
-      if (data.role === "aluno" && docId === user.uid) {
-        const currentStatus = migrationStatusRef.current;
-        
-        if (currentStatus === "idle") {
-          setMigrationStatus("migrating");
-          console.warn("Legacy profile detected (ID == UID). Triggering server-side migration...");
-          try {
-            const idToken = await user.getIdToken();
-            const response = await fetch("/api/auth/migrate-legacy", {
-              method: "POST",
-              headers: {
-                "Authorization": `Bearer ${idToken}`,
-                "Content-Type": "application/json"
-              }
-            });
-
-            if (response.ok) {
-              const result = await response.json();
-              console.log("Migration successful:", result);
-              setMigrationStatus("success");
-              // Force a re-fetch of the profile after migration
-              fetchProfile();
-              return;
-            } else {
-              const errorData = await response.json();
-              console.error("Migration failed:", errorData.error);
-              setMigrationStatus("error");
-            }
-          } catch (err) {
-            console.error("Error during migration call:", err);
-            setMigrationStatus("error");
-          }
-        } else if (currentStatus === "migrating") {
-          // Already migrating, just wait
-          return;
-        } else if (currentStatus === "error") {
-          // Stop retry on error to prevent console spam
-          console.error("Migration is in error state. Stopping retries.");
-          setProfile(data); // Still set profile so app can work if possible
-          setLoading(false);
-          return;
-        }
-        return; // Ensure we don't proceed to setProfile(data) if it's legacy and we are handling it
-      }
-
-      setProfile(data);
-      // Set cookies for middleware
-      document.cookie = `user_uid=${user.uid}; path=/; max-age=86400; SameSite=None; Secure`;
-      document.cookie = `user_role=${data.role}; path=/; max-age=86400; SameSite=None; Secure`;
-
-      // Update lastLogin if not updated recently AND NOT in legacy state
-      if (docId !== user.uid) {
-        const now = new Date().getTime();
-        const lastLoginTime = data.lastLogin?.seconds ? data.lastLogin.seconds * 1000 : 0;
-        if (now - lastLoginTime > 24 * 60 * 60 * 1000) {
-          updateDoc(doc(db, "users", docId), { lastLogin: serverTimestamp() }).catch(console.error);
-        }
-      }
-      setLoading(false);
-    }
   }, [user]);
 
-  return { user, profile, loading, migrationStatus };
+  return { user, profile, loading };
 }

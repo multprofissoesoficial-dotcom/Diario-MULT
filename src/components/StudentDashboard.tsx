@@ -118,7 +118,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
   }, [profile.uid, profile.franquiaId]);
 
   useEffect(() => {
-    const enrollmentsRef = collection(db, "users", profile.uid, "enrollments");
+    const enrollmentsRef = collection(db, "users", profile.id, "enrollments");
     const unsubEnrollments = onSnapshot(enrollmentsRef, (snap) => {
       const list = snap.docs.map(d => d.data() as Enrollment);
       setEnrollments(list);
@@ -166,7 +166,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     );
 
     if (newBadges.length > 0) {
-      const userRef = doc(db, "users", profile.uid);
+      const userRef = doc(db, "users", profile.id);
       const courseId = activeEnrollment?.courseId || "INF";
       
       // Senior Audit: Prevent frontend writes to legacy profiles
@@ -181,7 +181,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
       });
 
       // Also update enrollment badges
-      await updateDoc(doc(db, "users", profile.uid, "enrollments", courseId), {
+      await updateDoc(doc(db, "users", profile.id, "enrollments", courseId), {
         unlockedBadges: arrayUnion(...newBadges.map(b => b.id))
       });
       
@@ -236,7 +236,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
 
           // Update currentLesson in enrollment - ONLY if not legacy
           if (activeEnrollment && absLesson > activeEnrollment.currentLesson && profile.uid !== auth.currentUser?.uid) {
-            await updateDoc(doc(db, "users", profile.uid, "enrollments", courseId), {
+            await updateDoc(doc(db, "users", profile.id, "enrollments", courseId), {
               currentLesson: absLesson
             });
           }
@@ -275,7 +275,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
         resumeUrl = await getDownloadURL(resumeRef);
       }
 
-      const userRef = doc(db, "users", profile.uid);
+      const userRef = doc(db, "users", profile.id);
       await updateDoc(userRef, {
         skills: selectedSkills,
         resumeUrl: resumeUrl
@@ -339,7 +339,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     }
     setLoadingTerms(true);
     try {
-      await updateDoc(doc(db, "users", profile.uid), {
+      await updateDoc(doc(db, "users", profile.id), {
         atsTermsAccepted: true,
         atsTermsAcceptedAt: serverTimestamp()
       });
@@ -423,7 +423,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
                   alert("Seu perfil está em modo de compatibilidade (Legado).");
                   return;
                 }
-                await updateDoc(doc(db, "users", profile.uid), {
+                await updateDoc(doc(db, "users", profile.id), {
                   currentCourseId: e.target.value
                 });
               }}
