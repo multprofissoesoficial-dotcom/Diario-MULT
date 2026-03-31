@@ -149,6 +149,76 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   });
   
+  const [relinkLoading, setRelinkLoading] = useState(false);
+  const [relinkReport, setRelinkReport] = useState<any>(null);
+  const [diagnoseLoading, setDiagnoseLoading] = useState(false);
+  const [diagnoseReport, setDiagnoseReport] = useState<any>(null);
+  const [diagnoseName, setDiagnoseName] = useState("");
+  const [showRelinkConfirm, setShowRelinkConfirm] = useState(false);
+
+  const handleRunRelink = async (dryRun = true) => {
+    setRelinkLoading(true);
+    setRelinkReport(null);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const response = await fetch("/api/maintenance/relink-missions", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ action: "relink", dryRun }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao re-vincular missões");
+      }
+
+      const data = await response.json();
+      setRelinkReport(data.report);
+      setShowRelinkConfirm(false);
+      if (!dryRun) {
+        fetchMissions(true);
+      }
+    } catch (err: any) {
+      console.error("Erro no re-vínculo:", err);
+      alert("Erro no re-vínculo: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setRelinkLoading(false);
+    }
+  };
+
+  const handleRunDiagnose = async () => {
+    if (!diagnoseName.trim()) return;
+    setDiagnoseLoading(true);
+    setDiagnoseReport(null);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const response = await fetch("/api/maintenance/relink-missions", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ action: "diagnose", studentName: diagnoseName }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao diagnosticar aluno");
+      }
+
+      const data = await response.json();
+      setDiagnoseReport(data);
+    } catch (err: any) {
+      console.error("Erro no diagnóstico:", err);
+      alert("Erro no diagnóstico: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setDiagnoseLoading(false);
+    }
+  };
+
   const [selectedMissionForView, setSelectedMissionForView] = useState<Mission | null>(null);
   
   // Form states
@@ -1404,6 +1474,156 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         <CourseManager courses={courses} />
       ) : activeTab === "maintenance" ? (
         <div className="space-y-8">
+          <div className="glass-card p-8 border-neon-blue/20 bg-neon-blue/5">
+            <div className="flex items-start gap-6">
+              <div className="w-16 h-16 rounded-2xl bg-neon-blue/20 flex items-center justify-center text-neon-blue shrink-0 border border-neon-blue/30">
+                <Search className="w-8 h-8" />
+              </div>
+              <div className="space-y-4 w-full">
+                <div>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Diagnóstico de Aluno</h2>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Busca por usuários e missões pelo nome para identificar problemas de vínculo.
+                  </p>
+                </div>
+                
+                <div className="flex gap-4">
+                  <input
+                    type="text"
+                    value={diagnoseName}
+                    onChange={(e) => setDiagnoseName(e.target.value)}
+                    placeholder="Nome do aluno (Ex: Maria Josicleide)"
+                    className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-neon-blue transition-all"
+                  />
+                  <button
+                    onClick={handleRunDiagnose}
+                    disabled={diagnoseLoading || !diagnoseName.trim()}
+                    className="bg-neon-blue hover:bg-neon-blue/80 text-black font-black py-3 px-6 rounded-xl transition-all neon-glow-blue text-xs uppercase tracking-widest flex items-center gap-3 disabled:opacity-50"
+                  >
+                    {diagnoseLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Search className="w-5 h-5" />
+                    )}
+                    Diagnosticar
+                  </button>
+                </div>
+
+                {diagnoseReport && (
+                  <div className="space-y-4 pt-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="p-4 bg-black/60 rounded-xl border border-white/5">
+                        <h4 className="text-xs font-black text-gray-500 uppercase tracking-widest mb-3">Usuários Encontrados</h4>
+                        {diagnoseReport.usersFound.length === 0 ? (
+                          <p className="text-xs text-gray-600 italic">Nenhum usuário encontrado.</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {diagnoseReport.usersFound.map((u: any) => (
+                              <div key={u.id} className="p-2 bg-white/5 rounded border border-white/5 text-[10px]">
+                                <p className="text-white font-bold">{u.displayName}</p>
+                                <p className="text-gray-500">ID: {u.id} | UID: {u.uid}</p>
+                                <p className="text-gray-500">Email: {u.email} | Unidade: {u.franquiaId}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-4 bg-black/60 rounded-xl border border-white/5">
+                        <h4 className="text-xs font-black text-gray-500 uppercase tracking-widest mb-3">Missões Encontradas</h4>
+                        {diagnoseReport.missionsFound.length === 0 ? (
+                          <p className="text-xs text-gray-600 italic">Nenhuma missão encontrada.</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {diagnoseReport.missionsFound.map((m: any) => (
+                              <div key={m.id} className="p-2 bg-white/5 rounded border border-white/5 text-[10px]">
+                                <p className="text-white font-bold">{m.module} - Aula {m.classNum}</p>
+                                <p className="text-gray-500">StudentId: {m.studentId} | Nome: {m.studentName}</p>
+                                <p className="text-gray-500">Status: {m.status} | Data: {new Date(m.createdAt).toLocaleDateString()}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="glass-card p-8 border-red-500/20 bg-red-500/5">
+            <div className="flex items-start gap-6">
+              <div className="w-16 h-16 rounded-2xl bg-red-500/20 flex items-center justify-center text-red-500 shrink-0 border border-red-500/30">
+                <ShieldCheck className="w-8 h-8" />
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Re-vínculo de Missões Órfãs</h2>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Ferramenta de emergência para recuperar missões que perderam o vínculo com o aluno após a migração.
+                  </p>
+                </div>
+                
+                <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {[
+                    "Identificar missões com studentId inexistente",
+                    "Tentar re-vincular pelo Nome do Aluno + Unidade",
+                    "Tentar re-vincular pelo legacyUid (UID original)",
+                    "Garantir que o progresso do aluno seja restaurado"
+                  ].map((item, i) => (
+                    <li key={i} className="flex items-center gap-3 text-xs text-gray-300">
+                      <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="pt-4 flex items-center gap-4">
+                  <button
+                    onClick={() => handleRunRelink(true)}
+                    disabled={relinkLoading}
+                    className="bg-white/10 hover:bg-white/20 text-white font-black py-4 px-8 rounded-xl transition-all text-xs uppercase tracking-widest flex items-center gap-3 disabled:opacity-50"
+                  >
+                    {relinkLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Eye className="w-5 h-5" />
+                    )}
+                    Simular Re-vínculo
+                  </button>
+                  <button
+                    onClick={() => setShowRelinkConfirm(true)}
+                    disabled={relinkLoading}
+                    className="bg-red-500 hover:bg-red-600 text-white font-black py-4 px-8 rounded-xl transition-all neon-glow-red text-xs uppercase tracking-widest flex items-center gap-3 disabled:opacity-50"
+                  >
+                    <Zap className="w-5 h-5" />
+                    Executar Re-vínculo Real
+                  </button>
+                </div>
+
+                {relinkReport && (
+                  <div className="p-6 bg-black/60 rounded-2xl border border-white/5 space-y-4">
+                    <h3 className="text-sm font-black text-white uppercase tracking-tighter">Resultado do Re-vínculo</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="p-3 bg-white/5 rounded-xl">
+                        <p className="text-[10px] text-gray-500 uppercase font-black mb-1">Órfãs</p>
+                        <p className="text-xl font-black text-white">{relinkReport.orphanedMissions}</p>
+                      </div>
+                      <div className="p-3 bg-white/5 rounded-xl">
+                        <p className="text-[10px] text-gray-500 uppercase font-black mb-1">Recuperadas</p>
+                        <p className="text-xl font-black text-green-400">{relinkReport.relinkedMissions}</p>
+                      </div>
+                      <div className="p-3 bg-white/5 rounded-xl">
+                        <p className="text-[10px] text-gray-500 uppercase font-black mb-1">Não Resolvidas</p>
+                        <p className="text-xl font-black text-red-400">{relinkReport.unresolvedMissions}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="glass-card p-8 border-red-500/20 bg-red-500/5">
             <div className="flex items-start gap-6">
               <div className="w-16 h-16 rounded-2xl bg-red-500/20 flex items-center justify-center text-red-500 shrink-0 border border-red-500/30">
@@ -2161,6 +2381,41 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                     </button>
                   </div>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showRelinkConfirm && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="bg-zinc-900 border border-red-500/30 p-8 rounded-3xl max-w-md w-full shadow-2xl"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-red-500/20 flex items-center justify-center text-red-500 mb-6 mx-auto border border-red-500/30">
+                <AlertCircle className="w-8 h-8" />
+              </div>
+              <h3 className="text-2xl font-black text-white text-center uppercase tracking-tighter mb-4">Atenção Crítica</h3>
+              <p className="text-gray-400 text-center text-sm leading-relaxed mb-8">
+                Você está prestes a executar o re-vínculo real de missões. Esta ação irá alterar permanentemente o campo <code className="text-red-400">studentId</code> de centenas de registros.
+              </p>
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={() => handleRunRelink(false)}
+                  disabled={relinkLoading}
+                  className="w-full bg-red-500 hover:bg-red-600 text-white font-black py-4 rounded-xl transition-all neon-glow-red text-xs uppercase tracking-widest flex items-center justify-center gap-3"
+                >
+                  {relinkLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Sim, Executar Re-vínculo"}
+                </button>
+                <button
+                  onClick={() => setShowRelinkConfirm(false)}
+                  disabled={relinkLoading}
+                  className="w-full bg-white/5 hover:bg-white/10 text-gray-400 font-black py-4 rounded-xl transition-all text-xs uppercase tracking-widest"
+                >
+                  Cancelar
+                </button>
               </div>
             </motion.div>
           </div>
