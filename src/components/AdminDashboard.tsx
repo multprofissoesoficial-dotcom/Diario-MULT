@@ -109,6 +109,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   );
   const [maintenanceReport, setMaintenanceReport] = useState<any>(null);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
+  const [missionsFixLoading, setMissionsFixLoading] = useState(false);
+  const [missionsFixReport, setMissionsFixReport] = useState<any>(null);
   const [showMaintenanceConfirm, setShowMaintenanceConfirm] = useState(false);
   const [cleanupReport, setCleanupReport] = useState<any>(null);
   const [cleanupLoading, setCleanupLoading] = useState(false);
@@ -901,6 +903,32 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
+  const handleRunMissionsFix = async () => {
+    setMissionsFixLoading(true);
+    setMissionsFixReport(null);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch("/api/maintenance/fix-missions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMissionsFixReport(data);
+        setSuccessMsg(data.message);
+        setTimeout(() => setSuccessMsg(""), 5000);
+      } else {
+        throw new Error(data.error);
+      }
+    } catch (err: any) {
+      alert("Erro ao executar saneamento de missões: " + err.message);
+    } finally {
+      setMissionsFixLoading(false);
+    }
+  };
+
   const handleRunMaintenance = async () => {
     setMaintenanceLoading(true);
     setMaintenanceReport(null);
@@ -1453,6 +1481,43 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                     Remover Rastros de Migração
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="glass-card p-8 border-neon-blue/20 bg-neon-blue/5">
+            <div className="flex items-start gap-6">
+              <div className="w-16 h-16 rounded-2xl bg-neon-blue/20 flex items-center justify-center text-neon-blue shrink-0 border border-neon-blue/30">
+                <Target className="w-8 h-8" />
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Saneamento de Missões</h2>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Vincula missões antigas à unidade "Rio Verde" e garante que novas missões tenham franquiaId.
+                  </p>
+                </div>
+                
+                <div className="pt-4 flex items-center gap-4">
+                  <button
+                    onClick={handleRunMissionsFix}
+                    disabled={missionsFixLoading}
+                    className="bg-neon-blue hover:bg-neon-blue/80 text-black font-black py-4 px-8 rounded-xl transition-all neon-glow-blue text-xs uppercase tracking-widest flex items-center gap-3 disabled:opacity-50"
+                  >
+                    {missionsFixLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Zap className="w-5 h-5" />
+                    )}
+                    Saneamento de Franquia (Missões)
+                  </button>
+                </div>
+
+                {missionsFixReport && (
+                  <div className="p-3 bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-bold rounded-lg">
+                    {missionsFixReport.message}
+                  </div>
+                )}
               </div>
             </div>
           </div>
