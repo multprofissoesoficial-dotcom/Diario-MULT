@@ -144,35 +144,31 @@ export async function POST(request: Request) {
             return;
           }
 
-          // Create new user
+          // Create or Get user from Auth
           let userRecord;
           try {
-            // Try to get by compositeId if exists in Auth
-            if (compositeId) {
-              try {
-                userRecord = await adminAuth.getUser(compositeId);
-              } catch (e) {
-                userRecord = await adminAuth.getUserByEmail(finalEmail);
-              }
-            } else {
-              userRecord = await adminAuth.getUserByEmail(finalEmail);
-            }
+            // ALWAYS try to get by email first to link legacy accounts
+            userRecord = await adminAuth.getUserByEmail(finalEmail);
+            console.log(`Found existing Auth user for ${finalEmail}: ${userRecord.uid}`);
           } catch (authErr: any) {
             if (authErr.code === "auth/user-not-found" || authErr.message?.includes("NOT_FOUND")) {
+              // Create new user if not exists
               userRecord = await adminAuth.createUser({
-                uid: compositeId || undefined,
+                uid: compositeId || undefined, // Use compositeId as UID for new users if possible
                 email: finalEmail,
                 password: senha || String(codigo) || "nome123",
                 displayName: nome,
               });
+              console.log(`Created new Auth user for ${finalEmail}: ${userRecord.uid}`);
             } else {
               throw authErr;
             }
           }
 
-          const newUserRef = adminDb.collection("users").doc(userRecord.uid);
+          // Use compositeId as the DOCUMENT ID, but store the Auth UID inside
+          const newUserRef = adminDb.collection("users").doc(compositeId || userRecord.uid);
           const studentData = {
-            uid: userRecord.uid,
+            uid: userRecord.uid, // This is the CRITICAL link to Auth
             displayName: nome,
             email: finalEmail,
             codigo: codigo || "",
@@ -185,7 +181,7 @@ export async function POST(request: Request) {
             currentCourseId: courseId
           };
 
-          await newUserRef.set(studentData);
+          await newUserRef.set(studentData, { merge: true });
           
           // Update global counters for new student
           const { FieldValue } = require("firebase-admin/firestore");

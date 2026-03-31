@@ -48,24 +48,31 @@ export function useAuth() {
         if (docSnap.exists()) {
           finalDocId = user.uid;
         } else {
-          // Step 2: Fallback Query (Search for document with legacyUid == user.uid)
-          // This is now the priority absolute for migrated students
-          const q = query(collection(db, "users"), where("legacyUid", "==", user.uid), limit(1));
-          const querySnap = await getDocs(q);
+          // Step 2: Search by 'uid' field (CRITICAL for users with legacy UIDs and standardized Doc IDs)
+          const qUid = query(collection(db, "users"), where("uid", "==", user.uid), limit(1));
+          const queryUidSnap = await getDocs(qUid);
           
-          if (!querySnap.empty) {
-            finalDocId = querySnap.docs[0].id;
+          if (!queryUidSnap.empty) {
+            finalDocId = queryUidSnap.docs[0].id;
           } else {
-            // Step 3: Try composite ID from claims if available
-            const tokenResult = await user.getIdTokenResult();
-            const { franquiaId, codigo } = tokenResult.claims;
+            // Step 3: Fallback Query (Search for document with legacyUid == user.uid)
+            const qLegacy = query(collection(db, "users"), where("legacyUid", "==", user.uid), limit(1));
+            const queryLegacySnap = await getDocs(qLegacy);
             
-            if (franquiaId && codigo) {
-              const compositeId = `${franquiaId}_${codigo}`.toLowerCase().replace(/\s+/g, "");
-              const compositeDocRef = doc(db, "users", compositeId);
-              const compositeSnap = await getDoc(compositeDocRef);
-              if (compositeSnap.exists()) {
-                finalDocId = compositeId;
+            if (!queryLegacySnap.empty) {
+              finalDocId = queryLegacySnap.docs[0].id;
+            } else {
+              // Step 4: Try composite ID from claims if available
+              const tokenResult = await user.getIdTokenResult();
+              const { franquiaId, codigo } = tokenResult.claims;
+              
+              if (franquiaId && codigo) {
+                const compositeId = `${franquiaId}_${codigo}`.toLowerCase().replace(/\s+/g, "");
+                const compositeDocRef = doc(db, "users", compositeId);
+                const compositeSnap = await getDoc(compositeDocRef);
+                if (compositeSnap.exists()) {
+                  finalDocId = compositeId;
+                }
               }
             }
           }

@@ -73,10 +73,12 @@ export async function POST(req: NextRequest) {
       // Transfer associated data
       await transferAssociatedData(uid, expectedId);
       
-      // Update official with legacyUid if missing
-      if (!officialData?.legacyUid) {
-        await adminDb.collection("users").doc(expectedId).update({ legacyUid: uid });
+      // Update official with legacyUid and uid if missing or incorrect
+      const updates: any = { legacyUid: uid };
+      if (officialData?.uid !== uid) {
+        updates.uid = uid; // Ensure the link to Auth UID is correct
       }
+      await adminDb.collection("users").doc(expectedId).update(updates);
       
       // Delete old
       await adminDb.collection("users").doc(uid).delete();
@@ -84,7 +86,7 @@ export async function POST(req: NextRequest) {
       // Move logic
       const dataToCopy = { ...data };
       dataToCopy.legacyUid = uid;
-      dataToCopy.uid = expectedId;
+      dataToCopy.uid = uid; // CRITICAL: This is the Auth UID
       
       await transferAssociatedData(uid, expectedId);
       

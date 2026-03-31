@@ -1,33 +1,56 @@
 "use client";
 
 import React, { useState } from "react";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "../firebase";
 import { motion } from "motion/react";
-import { Rocket, Mail, Lock as LockIcon, ShieldCheck } from "lucide-react";
+import { Rocket, Mail, Lock as LockIcon, ShieldCheck, HelpCircle } from "lucide-react";
 
 export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
   const [activeTab, setActiveTab] = useState<"aluno" | "admin">("aluno");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+
+  const getFinalEmail = (id: string) => {
+    let email = id.trim();
+    if (activeTab === "aluno" && !email.includes("@")) {
+      email = `${email}@mult.com.br`;
+    }
+    return email;
+  };
+
+  const handleForgotPassword = async () => {
+    if (!identifier) {
+      setError("Digite seu e-mail ou matrícula primeiro.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    setSuccess("");
+    try {
+      const email = getFinalEmail(identifier);
+      await sendPasswordResetEmail(auth, email);
+      setSuccess("E-mail de recuperação enviado! Verifique sua caixa de entrada.");
+    } catch (err: any) {
+      console.error("Erro ao enviar reset:", err);
+      setError("Erro ao enviar e-mail. Verifique se os dados estão corretos.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setSuccess("");
     setLoading(true);
 
     try {
-      let finalEmail = identifier.trim();
-      
-      if (activeTab === "aluno") {
-        // If it's a student and identifier is numeric or doesn't have @, assume it's a student code
-        if (!finalEmail.includes("@")) {
-          finalEmail = `${finalEmail}@mult.com.br`;
-        }
-      }
-
+      const finalEmail = getFinalEmail(identifier);
       await signInWithEmailAndPassword(auth, finalEmail, password);
     } catch (err: any) {
       console.error("Erro de login:", err.code, err.message);
@@ -123,6 +146,16 @@ export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
             </div>
           </div>
 
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              className="text-[10px] font-bold text-gray-500 hover:text-mult-orange transition-colors uppercase tracking-widest flex items-center gap-1"
+            >
+              <HelpCircle className="w-3 h-3" /> Esqueci minha senha
+            </button>
+          </div>
+
           {error && (
             <motion.p 
               initial={{ opacity: 0, y: -10 }}
@@ -130,6 +163,16 @@ export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
               className="text-red-400 text-[11px] text-center font-bold bg-red-400/10 py-2 rounded-lg border border-red-400/20"
             >
               {error}
+            </motion.p>
+          )}
+
+          {success && (
+            <motion.p 
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-green-400 text-[11px] text-center font-bold bg-green-400/10 py-2 rounded-lg border border-green-400/20"
+            >
+              {success}
             </motion.p>
           )}
 

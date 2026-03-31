@@ -66,18 +66,9 @@ export async function POST(request: Request) {
 
     let userRecord;
     try {
-      // 1. Try to get by compositeId if student
-      if (compositeId) {
-        try {
-          userRecord = await adminAuth.getUser(compositeId);
-        } catch (e) {
-          // Not found by compositeId, try by email
-          userRecord = await adminAuth.getUserByEmail(finalEmail);
-        }
-      } else {
-        // 2. Try by email for non-students or if no compositeId
-        userRecord = await adminAuth.getUserByEmail(finalEmail);
-      }
+      // ALWAYS try to get by email first to link legacy accounts
+      userRecord = await adminAuth.getUserByEmail(finalEmail);
+      console.log(`Found existing Auth user for ${finalEmail}: ${userRecord.uid}`);
     } catch (error: any) {
       // If user not found, create it
       if (error.code === "auth/user-not-found" || error.message?.includes("NOT_FOUND")) {
@@ -88,6 +79,7 @@ export async function POST(request: Request) {
             password: senha,
             displayName: nome,
           });
+          console.log(`Created new Auth user for ${finalEmail}: ${userRecord.uid}`);
         } catch (createErr: any) {
           console.error("Error creating user:", createErr);
           return NextResponse.json({ error: "Erro ao criar usuário." }, { status: 500 });
@@ -100,7 +92,7 @@ export async function POST(request: Request) {
     }
 
     const userData = {
-      uid: userRecord.uid,
+      uid: userRecord.uid, // CRITICAL: Link to Auth UID
       displayName: nome,
       email: finalEmail,
       codigo: codigo || "",
@@ -112,8 +104,9 @@ export async function POST(request: Request) {
       createdAt: new Date().toISOString(),
     };
 
-    // Rule 1: Use .set with merge: true
-    await adminDb.collection("users").doc(userRecord.uid).set(userData, { merge: true });
+    // Use compositeId as Document ID if student, otherwise use UID
+    const finalDocId = compositeId || userRecord.uid;
+    await adminDb.collection("users").doc(finalDocId).set(userData, { merge: true });
 
     // Update global counters if it's a new user
     // We check if it's a new user by checking if the userRecord was just created
