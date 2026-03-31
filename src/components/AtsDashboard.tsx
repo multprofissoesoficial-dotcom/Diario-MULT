@@ -401,9 +401,20 @@ export default function AtsDashboard({ profile }: { profile: UserProfile }) {
       
       // Fetch student data for each application
       const appsWithStudents = await Promise.all(apps.map(async (app) => {
-        const q = query(collection(db, "users"), where("uid", "==", app.studentId), limit(1));
-        const studentSnap = await getDocs(q);
-        const studentData = studentSnap.empty ? undefined : { ...studentSnap.docs[0].data(), id: studentSnap.docs[0].id } as UserProfile;
+        // Try direct ID lookup first (composite ID)
+        let studentDoc = await getDoc(doc(db, "users", app.studentId));
+        let studentData: UserProfile | undefined;
+        
+        if (studentDoc.exists()) {
+          studentData = { ...studentDoc.data() as UserProfile, id: studentDoc.id };
+        } else {
+          // Fallback to searching by UID (legacy)
+          const q = query(collection(db, "users"), where("uid", "==", app.studentId), limit(1));
+          const studentSnap = await getDocs(q);
+          if (!studentSnap.empty) {
+            studentData = { ...studentSnap.docs[0].data() as UserProfile, id: studentSnap.docs[0].id };
+          }
+        }
         return { ...app, student: studentData };
       }));
 

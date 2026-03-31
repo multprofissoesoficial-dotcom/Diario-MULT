@@ -106,7 +106,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     });
 
     // Fetch User Applications
-    const appsQuery = query(collection(db, "applications"), where("studentId", "==", profile.uid));
+    const appsQuery = query(collection(db, "applications"), where("studentId", "in", [profile.id, profile.uid]));
     const unsubApps = onSnapshot(appsQuery, (snap) => {
       setUserApplications(snap.docs.map(d => ({ id: d.id, ...d.data() } as Application)));
     });
@@ -115,7 +115,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
       unsubJobs();
       unsubApps();
     };
-  }, [profile.uid, profile.franquiaId]);
+  }, [profile.id, profile.uid, profile.franquiaId]);
 
   useEffect(() => {
     const enrollmentsRef = collection(db, "users", profile.id, "enrollments");
@@ -134,12 +134,12 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     });
 
     return () => unsubEnrollments();
-  }, [profile.uid, profile.currentCourseId]);
+  }, [profile.id, profile.uid, profile.currentCourseId]);
 
   useEffect(() => {
     const q = query(
       collection(db, "missions"),
-      where("studentId", "==", profile.uid)
+      where("studentId", "in", [profile.id, profile.uid])
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -153,7 +153,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     });
 
     return () => unsubscribe();
-  }, [profile.uid]);
+  }, [profile.id, profile.uid]);
 
   const checkBadges = async (missionData: Mission[]) => {
     const approvedMissions = missionData.filter(m => m.status !== "pending");
@@ -208,7 +208,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
           const absLesson = getAbsoluteLessonId(module, classNum);
 
           await addDoc(collection(db, "missions"), {
-            studentId: profile.uid,
+            studentId: profile.id,
             studentName: profile.displayName,
             franquiaId: profile.franquiaId || "rio-verde",
             turma: profile.turma || "024inf",
@@ -295,7 +295,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
 
       await addDoc(collection(db, "applications"), {
         jobId: job.id,
-        studentId: profile.uid,
+        studentId: profile.id,
         matchScore: score,
         status: 'pendente',
         appliedAt: serverTimestamp()

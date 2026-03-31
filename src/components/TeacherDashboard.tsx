@@ -232,15 +232,21 @@ export default function TeacherDashboard({ profile }: { profile: UserProfile }) 
     const xp = bonus ? XP_BONUS : XP_PER_MISSION;
 
     try {
-      // 1. Find the student document ID by UID (mission.studentId is the UID)
-      const q = query(collection(db, "users"), where("uid", "==", mission.studentId), limit(1));
-      const querySnap = await getDocs(q);
+      // 1. Find the student document ID by UID or direct ID (mission.studentId can be either)
+      let studentDoc = await getDoc(doc(db, "users", mission.studentId));
+      let studentDocId: string;
       
-      if (querySnap.empty) {
-        throw new Error("Estudante não encontrado para esta missão.");
+      if (studentDoc.exists()) {
+        studentDocId = studentDoc.id;
+      } else {
+        // Fallback to searching by UID (legacy)
+        const q = query(collection(db, "users"), where("uid", "==", mission.studentId), limit(1));
+        const querySnap = await getDocs(q);
+        if (querySnap.empty) {
+          throw new Error("Estudante não encontrado para esta missão.");
+        }
+        studentDocId = querySnap.docs[0].id;
       }
-      
-      const studentDocId = querySnap.docs[0].id;
 
       // 2. Update mission status and student XP
       await Promise.all([

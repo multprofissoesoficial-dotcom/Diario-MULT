@@ -6,6 +6,7 @@ import {
   query, 
   where, 
   getDocs, 
+  getDoc,
   doc, 
   setDoc, 
   deleteDoc,
@@ -938,15 +939,21 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     const xp = bonus ? XP_BONUS : XP_PER_MISSION;
 
     try {
-      // Find the student document ID by UID
-      const q = query(collection(db, "users"), where("uid", "==", mission.studentId), limit(1));
-      const studentSnap = await getDocs(q);
+      // Find the student document ID by UID or direct ID (mission.studentId can be either)
+      let studentDoc = await getDoc(doc(db, "users", mission.studentId));
+      let studentDocId: string;
       
-      if (studentSnap.empty) {
-        throw new Error("Estudante não encontrado para esta missão.");
+      if (studentDoc.exists()) {
+        studentDocId = studentDoc.id;
+      } else {
+        // Fallback to searching by UID (legacy)
+        const q = query(collection(db, "users"), where("uid", "==", mission.studentId), limit(1));
+        const studentSnap = await getDocs(q);
+        if (studentSnap.empty) {
+          throw new Error("Estudante não encontrado para esta missão.");
+        }
+        studentDocId = studentSnap.docs[0].id;
       }
-      
-      const studentDocId = studentSnap.docs[0].id;
 
       await Promise.all([
         updateDoc(doc(db, "missions", mission.id), {
