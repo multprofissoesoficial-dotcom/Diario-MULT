@@ -31,19 +31,37 @@ export default function MissionHistoryModal({ student, onClose }: MissionHistory
     const fetchMissions = async () => {
       setLoading(true);
       try {
+        const queryIds = [student.id, student.uid].filter(Boolean);
+        if (queryIds.length === 0) {
+          setMissions([]);
+          setLoading(false);
+          return;
+        }
+
         const q = query(
           collection(db, "missions"),
-          where("studentId", "in", [student.id, student.uid]),
-          orderBy("createdAt", "desc"),
-          limit(50)
+          where("studentId", "in", queryIds),
+          limit(100)
         );
         const snap = await getDocs(q);
-        setMissions(snap.docs.map(d => ({ id: d.id, ...d.data() } as Mission)));
-      } catch (err) {
+        const fetchedMissions = snap.docs.map(d => ({ id: d.id, ...d.data() } as Mission));
+        
+        // Sort client-side to avoid index requirement
+        fetchedMissions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        
+        setMissions(fetchedMissions);
+      } catch (err: any) {
+        console.error("Error fetching missions:", err);
         try {
           handleFirestoreError(err, OperationType.GET, "missions");
         } catch (e: any) {
-          setError("Erro de permissão ao acessar histórico.");
+          // If it's a JSON error from handleFirestoreError, try to parse it
+          try {
+            const errData = JSON.parse(e.message);
+            setError(`Erro ao carregar: ${errData.error || "Permissão negada"}`);
+          } catch {
+            setError("Erro de permissão ao acessar histórico.");
+          }
         }
       } finally {
         setLoading(false);

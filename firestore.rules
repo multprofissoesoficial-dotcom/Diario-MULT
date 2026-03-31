@@ -22,6 +22,12 @@ service cloud.firestore {
       return isSuperAdmin() || (exists(userPath) && get(userPath).data.role == 'master');
     }
 
+    // Verifica se o usuário pertence a uma franquia específica ou é Master
+    function hasFranchiseAccess(franquiaId) {
+      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      return isMaster() || (exists(userPath) && get(userPath).data.franquiaId == franquiaId);
+    }
+
     // Verifica se é o dono do documento (ID novo ou Legacy)
     function isOwner(userId) {
       return isAuthenticated() && (
@@ -41,16 +47,17 @@ service cloud.firestore {
     // Coleção de Usuários (Alunos, Professores, etc)
     match /users/{userId} {
       // Permite leitura se for o dono ou se for Master/Equipe
-      allow get: if isAuthenticated() && (isOwner(userId) || isMaster());
+      allow get: if isAuthenticated() && (isOwner(userId) || isMaster() || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['coordenador', 'professor'] && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId == resource.data.franquiaId));
       
       // Lista de usuários limitada para Master ou buscas pequenas
-      allow list: if isMaster() || (isAuthenticated() && request.query.limit <= 10);
+      allow list: if isMaster() || (isAuthenticated() && request.query.limit <= 10) || (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['coordenador', 'professor']);
 
       // Permite criar/atualizar: Necessário para a API de Importação e Migração
       allow create, update: if isAuthenticated() && (
         isMaster() || 
         request.auth.uid == userId ||
-        (request.resource.data.legacyUid == request.auth.uid)
+        (request.resource.data.legacyUid == request.auth.uid) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordenador' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId == request.resource.data.franquiaId)
       );
 
       allow delete: if isMaster();
@@ -58,9 +65,17 @@ service cloud.firestore {
 
     // Missões (Diários de Bordo)
     match /missions/{missionId} {
-      allow read: if isAuthenticated() && (isMaster() || resource.data.studentId == request.auth.uid);
+      allow read: if isAuthenticated() && (
+        isMaster() || 
+        resource.data.studentId == request.auth.uid || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['coordenador', 'professor'] && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId == resource.data.franquiaId)
+      );
       allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && (isMaster() || resource.data.studentId == request.auth.uid);
+      allow update: if isAuthenticated() && (
+        isMaster() || 
+        resource.data.studentId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['coordenador', 'professor'] && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.franquiaId == resource.data.franquiaId)
+      );
       allow delete: if isMaster();
     }
 
