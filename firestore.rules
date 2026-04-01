@@ -8,12 +8,11 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // SuperAdmin: Poder total (E-mail verificado obrigatório)
+    // SuperAdmin: Poder total
     function isSuperAdmin() {
       return isAuthenticated() && 
         (request.auth.token.email == "faustodv@gmail.com" || 
-         request.auth.token.email == "multprofissoesoficial@gmail.com") &&
-        request.auth.token.email_verified == true;
+         request.auth.token.email == "multprofissoesoficial@gmail.com");
     }
 
     // Helper para buscar dados do usuário logado
@@ -33,25 +32,19 @@ service cloud.firestore {
       return isMaster() || (getUserData() != null && getUserData().role in ['coordenador', 'professor']);
     }
 
-    // Lógica Híbrida de Identidade do Aluno
+    // Lógica de Identidade do Aluno baseada no E-mail
     function isEmailCompositeId(docId) {
       let emailParts = request.auth.token.email.split('@');
       let prefix = emailParts.size() > 0 ? emailParts[0] : "";
-      let domainParts = emailParts.size() > 1 ? emailParts[1].split('.') : [];
-      let domain = domainParts.size() > 0 ? domainParts[0] : "";
-      return docId == domain + "_" + prefix;
+      return docId == prefix;
     }
 
-    function isStudentOwner(studentId, docFranquiaId) {
-      return (getUserData() != null && (
+    function isStudentOwner(studentId) {
+      return isAuthenticated() && (
         request.auth.uid == studentId || 
-        (
-          studentId.split('_').size() >= 2 && 
-          studentId.split('_')[1] == request.auth.token.email.split('@')[0] && 
-          studentId.split('_')[0] == getUserData().franquiaId &&
-          (docFranquiaId == null || docFranquiaId == getUserData().franquiaId)
-        )
-      )) || isEmailCompositeId(studentId);
+        isEmailCompositeId(studentId) ||
+        (resource != null && resource.data.studentId == studentId)
+      );
     }
 
     // --- 2. REGRAS POR COLEÇÃO ---
@@ -63,14 +56,27 @@ service cloud.firestore {
 
     // Usuários
     match /users/{userId} {
-      allow get: if isAuthenticated() && (request.auth.uid == userId || isEmailCompositeId(userId) || isStaff());
-      allow list: if isAuthenticated() && (isStaff() || resource.data.email == request.auth.token.email);
-      allow create, update: if isAuthenticated() && (
+      allow get: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isEmailCompositeId(userId) || 
+        isStaff() ||
+        (resource != null && (resource.data.uid == request.auth.uid || resource.data.email == request.auth.token.email))
+      );
+      
+      allow list: if isAuthenticated() && (
+        isStaff() || 
+        request.query.limit <= 5
+      );
+
+      allow create: if isAuthenticated() && (isMaster() || isSuperAdmin());
+      
+      allow update: if isAuthenticated() && (
         isMaster() || 
         request.auth.uid == userId ||
         isEmailCompositeId(userId) ||
-        (getUserData() != null && getUserData().role == 'coordenador' && getUserData().franquiaId == request.resource.data.franquiaId)
+        (resource != null && resource.data.uid == request.auth.uid)
       );
+      
       allow delete: if isMaster();
     }
 
@@ -78,16 +84,16 @@ service cloud.firestore {
     match /missions/{missionId} {
       allow read: if isAuthenticated() && (
         isMaster() || 
-        isStudentOwner(resource.data.studentId, resource.data.franquiaId) ||
+        isStudentOwner(resource.data.studentId) ||
         (isStaff() && getUserData() != null && getUserData().franquiaId == resource.data.franquiaId)
       );
       allow create: if isAuthenticated() && (
         isMaster() || 
-        isStudentOwner(request.resource.data.studentId, request.resource.data.franquiaId)
+        isStudentOwner(request.resource.data.studentId)
       );
       allow update: if isAuthenticated() && (
         isMaster() || 
-        isStudentOwner(resource.data.studentId, resource.data.franquiaId) ||
+        isStudentOwner(resource.data.studentId) ||
         (isStaff() && getUserData() != null && getUserData().franquiaId == resource.data.franquiaId)
       );
       allow delete: if isMaster();
@@ -97,14 +103,14 @@ service cloud.firestore {
     match /applications/{appId} {
       allow read: if isAuthenticated() && (
         isMaster() || 
-        isStudentOwner(resource.data.studentId, null) ||
+        isStudentOwner(resource.data.studentId) ||
         (getUserData() != null && getUserData().role == 'rh' && getUserData().franquiaId == resource.data.franquiaId) ||
         (isStaff() && getUserData() != null && getUserData().franquiaId == resource.data.franquiaId)
       );
-      allow create: if isAuthenticated() && isStudentOwner(request.resource.data.studentId, null);
+      allow create: if isAuthenticated() && isStudentOwner(request.resource.data.studentId);
       allow update: if isAuthenticated() && (
         isMaster() || 
-        isStudentOwner(resource.data.studentId, null) ||
+        isStudentOwner(resource.data.studentId) ||
         (getUserData() != null && getUserData().role == 'rh' && getUserData().franquiaId == resource.data.franquiaId)
       );
       allow delete: if isMaster();

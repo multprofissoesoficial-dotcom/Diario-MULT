@@ -113,6 +113,9 @@ export default function App() {
                   <p className="text-gray-400 text-sm">
                     Sua conta de acesso existe, mas seu perfil de aluno/colaborador não foi encontrado no banco de dados.
                   </p>
+                  <p className="text-[10px] text-red-400/60 uppercase tracking-widest font-bold">
+                    Verifique o Console (F12) para detalhes técnicos.
+                  </p>
                 </div>
                 
                 <div className="bg-black/40 p-4 rounded-xl border border-white/5 text-left space-y-2">
