@@ -295,7 +295,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   useEffect(() => {
     // Listen to Franquias
     const unsubFranquias = onSnapshot(collection(db, "franquias"), (snap) => {
-      setFranquias(snap.docs.map(d => ({ id: d.id, ...d.data() } as Franquia)));
+      setFranquias(snap.docs.map(d => d.data() as Franquia));
     }, (err) => handleFirestoreError(err, OperationType.GET, "franquias"));
 
     const unsubCourses = onSnapshot(collection(db, "courses"), (snap) => {
@@ -465,7 +465,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       }
 
       const snap = await getDocs(q);
-      const newUsers = snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile));
+      const newUsers = snap.docs.map(d => d.data() as UserProfile);
       
       if (reset) {
         setUsers(newUsers);

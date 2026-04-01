@@ -53,34 +53,30 @@ export function useAuth() {
       try {
         const email = user.email?.toLowerCase() || "";
         const [prefix] = email.split('@');
+        let guessedCompositeId = (prefix && prefix.includes('_')) ? prefix : null;
         let targetDocId: string | null = null;
 
-        // 1. Tenta por ID de Documento Direto (Prefixo do E-mail ou E-mail completo)
-        // Administradores costumam ter o ID como o prefixo (ex: faustodv) ou o e-mail
-        const possibleIds = [prefix, email];
-        console.log("Tentativa 1: Buscando por IDs diretos:", possibleIds);
-        
-        for (const id of possibleIds) {
-          if (!id || targetDocId) continue;
+        // 1. Tenta por ID Composto (Prefixo do E-mail)
+        if (guessedCompositeId) {
+          console.log("Tentativa 1: Buscando por ID Composto:", guessedCompositeId);
           try {
-            const docRef = doc(db, "users", id);
+            const docRef = doc(db, "users", guessedCompositeId);
             const docSnap = await getDoc(docRef);
             if (docSnap.exists()) {
-              targetDocId = id;
-              console.log(`Perfil encontrado por ID direto: ${id}`);
+              targetDocId = guessedCompositeId;
+              console.log("Perfil encontrado por ID Composto!");
               if (docSnap.data().uid !== user.uid) {
                 await updateDoc(docRef, { uid: user.uid });
               }
-              break;
             }
           } catch (e) {
-            console.warn(`Erro ao tentar ID ${id}:`, e);
+            handleFirestoreError(e, OperationType.GET, `users/${guessedCompositeId}`);
           }
         }
 
-        // 2. Tenta por Campos Compostos (Apenas se parecer padrão de aluno: unidade_codigo)
-        if (!targetDocId && prefix && prefix.includes('_')) {
-          const [fId, cod] = prefix.split('_');
+        // 2. Tenta por Campos Compostos (franquiaId + codigo)
+        if (!targetDocId && guessedCompositeId && guessedCompositeId.includes('_')) {
+          const [fId, cod] = guessedCompositeId.split('_');
           console.log("Tentativa 2: Buscando por campos franquiaId e codigo:", fId, cod);
           try {
             const qComp = query(collection(db, "users"), where("franquiaId", "==", fId), where("codigo", "==", cod), limit(1));
