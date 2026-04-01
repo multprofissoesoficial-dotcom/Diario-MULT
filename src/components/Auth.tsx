@@ -1,24 +1,59 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
-import { auth } from "../firebase";
+import { auth, db } from "../firebase";
 import { motion } from "motion/react";
-import { Rocket, Mail, Lock as LockIcon, ShieldCheck, HelpCircle } from "lucide-react";
+import { Rocket, Mail, Lock as LockIcon, ShieldCheck, HelpCircle, MapPin, ChevronRight } from "lucide-react";
+import { collection, getDocs, query, orderBy } from "firebase/firestore";
+
+interface Franquia {
+  id: string;
+  nome: string;
+}
 
 export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
   const [activeTab, setActiveTab] = useState<"aluno" | "admin">("aluno");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [selectedFranquia, setSelectedFranquia] = useState("");
+  const [franquias, setFranquias] = useState<Franquia[]>([]);
+  const [loadingFranquias, setLoadingFranquias] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
 
+  useEffect(() => {
+    const fetchFranquias = async () => {
+      setLoadingFranquias(true);
+      try {
+        console.log("Buscando franquias...");
+        const q = query(collection(db, "franquias"), orderBy("nome", "asc"));
+        const snap = await getDocs(q);
+        const list = snap.docs.map(doc => ({ id: doc.id, nome: doc.data().nome }));
+        console.log("Franquias encontradas:", list);
+        setFranquias(list);
+      } catch (err) {
+        console.error("Erro ao buscar franquias:", err);
+      } finally {
+        setLoadingFranquias(false);
+      }
+    };
+    fetchFranquias();
+  }, []);
+
   const getFinalEmail = (id: string) => {
-    let email = id.trim();
-    if (activeTab === "aluno" && !email.includes("@")) {
-      email = `${email}@mult.com.br`;
+    let email = id.trim().toLowerCase();
+    if (activeTab === "aluno") {
+      if (!email.includes("@")) {
+        // If it's just a code, we MUST have a selected unit
+        if (!selectedFranquia) {
+          throw new Error("Por favor, selecione sua unidade.");
+        }
+        // NEW STANDARD: unit_code@mult.com.br
+        email = `${selectedFranquia}_${email}@mult.com.br`;
+      }
     }
     return email;
   };
@@ -37,7 +72,7 @@ export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
       setSuccess("E-mail de recuperação enviado! Verifique sua caixa de entrada.");
     } catch (err: any) {
       console.error("Erro ao enviar reset:", err);
-      setError("Erro ao enviar e-mail. Verifique se os dados estão corretos.");
+      setError(err.message || "Erro ao enviar e-mail. Verifique se os dados estão corretos.");
     } finally {
       setLoading(false);
     }
@@ -51,15 +86,16 @@ export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
 
     try {
       const finalEmail = getFinalEmail(identifier);
+      console.log("Tentando login com:", finalEmail);
       await signInWithEmailAndPassword(auth, finalEmail, password);
     } catch (err: any) {
       console.error("Erro de login:", err.code, err.message);
       if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
-        setError("E-mail ou senha incorretos. Verifique seus dados e tente novamente.");
+        setError("Dados de acesso incorretos. Verifique sua unidade, matrícula e senha.");
       } else if (err.code === "auth/too-many-requests") {
         setError("Muitas tentativas. Tente novamente em alguns minutos.");
       } else {
-        setError("Erro ao autenticar. Verifique sua conexão ou tente novamente.");
+        setError(err.message || "Erro ao autenticar. Verifique sua conexão ou tente novamente.");
       }
     } finally {
       setLoading(false);
@@ -110,21 +146,54 @@ export default function Auth({ onSeedClick }: { onSeedClick: () => void }) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          {activeTab === "aluno" && (
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
+                Selecione sua Unidade
+              </label>
+              <div className="relative group">
+                <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-mult-orange transition-colors" />
+                <select
+                  required
+                  disabled={loadingFranquias}
+                  value={selectedFranquia}
+                  onChange={(e) => setSelectedFranquia(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-10 focus:outline-none transition-all text-sm focus:border-mult-orange focus:bg-mult-orange/5 appearance-none text-white cursor-pointer disabled:opacity-50"
+                >
+                  <option value="" disabled className="bg-cockpit-bg">
+                    {loadingFranquias ? "Carregando unidades..." : "Escolha sua unidade..."}
+                  </option>
+                  {franquias.map(f => (
+                    <option key={f.id} value={f.id} className="bg-cockpit-bg">{f.nome}</option>
+                  ))}
+                </select>
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
+                  <ChevronRight className="w-4 h-4 text-gray-500 rotate-90" />
+                </div>
+              </div>
+              <p className="text-[9px] text-gray-600 italic ml-1">A unidade é obrigatória para identificar seu perfil único.</p>
+            </div>
+          )}
+
           <div className="space-y-2">
             <label className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] ml-1">
-              {activeTab === "aluno" ? "Matrícula ou E-mail" : "E-mail Administrativo"}
+              {activeTab === "aluno" ? "Sua Matrícula" : "E-mail Administrativo"}
             </label>
             <div className="relative group">
-              <Mail className={`absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 transition-colors ${activeTab === "aluno" ? "group-focus-within:text-mult-orange" : "group-focus-within:text-neon-blue"}`} />
+              {activeTab === "aluno" ? (
+                <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-mult-orange transition-colors" />
+              ) : (
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-neon-blue transition-colors" />
+              )}
               <input
-                type="text"
+                type={activeTab === "aluno" ? "text" : "email"}
                 required
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 className={`w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-12 pr-4 focus:outline-none transition-all text-sm ${
                   activeTab === "aluno" ? "focus:border-mult-orange focus:bg-mult-orange/5" : "focus:border-neon-blue focus:bg-neon-blue/5"
                 }`}
-                placeholder={activeTab === "aluno" ? "Digite sua matrícula" : "seu@email.com"}
+                placeholder={activeTab === "aluno" ? "Ex: 14100" : "seu@email.com"}
               />
             </div>
           </div>

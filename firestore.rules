@@ -64,7 +64,7 @@ service cloud.firestore {
     // Usuários
     match /users/{userId} {
       allow get: if isAuthenticated() && (request.auth.uid == userId || isEmailCompositeId(userId) || isStaff());
-      allow list: if isStaff();
+      allow list: if isAuthenticated() && (isStaff() || resource.data.email == request.auth.token.email);
       allow create, update: if isAuthenticated() && (
         isMaster() || 
         request.auth.uid == userId ||
@@ -122,7 +122,7 @@ service cloud.firestore {
 
     // Franquias e Cursos
     match /franquias/{franquiaId} {
-      allow read: if isAuthenticated();
+      allow read: if true; // Permite leitura pública para que o login liste as unidades
       allow write: if isMaster();
     }
     match /courses/{courseId} {

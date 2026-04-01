@@ -33,36 +33,95 @@ export function useAuth() {
       setLoading(true);
       try {
         // 1. Try to construct compositeId from email (standard for students)
-        const email = user.email || "";
-        const [prefix, fullDomain] = email.split('@');
-        const domain = fullDomain ? fullDomain.split('.')[0] : "";
-        const compositeId = (prefix && domain && domain !== 'gmail' && domain !== 'outlook' && domain !== 'hotmail') 
-          ? `${domain}_${prefix}` 
-          : null;
+        const email = user.email?.toLowerCase() || "";
+        const [prefix] = email.split('@');
+        
+        // NOVO PADRÃO: prefixo é "unidade_codigo" (ex: rio-verde_14100)
+        let guessedCompositeId = (prefix && prefix.includes('_')) ? prefix : null;
 
         let targetDocId: string | null = null;
 
-        if (compositeId) {
-          const docRef = doc(db, "users", compositeId);
+        if (guessedCompositeId) {
+          const docRef = doc(db, "users", guessedCompositeId);
           const docSnap = await getDoc(docRef);
           if (docSnap.exists()) {
-            targetDocId = compositeId;
+            targetDocId = guessedCompositeId;
             
             // HANDSHAKE: If UID is missing or different, update it
             const data = docSnap.data();
             if (data.uid !== user.uid) {
-              console.log(`Handshake: Updating UID for ${compositeId}`);
+              console.log(`Handshake: Updating UID for ${guessedCompositeId}`);
               await updateDoc(docRef, { uid: user.uid });
             }
           }
         }
 
-        // 2. Fallback: Search by UID field (for Master/Staff or legacy accounts)
+        // 2. Fallback 1: Search by franquiaId and codigo (Using the composite index shown in user screenshot)
+        if (!targetDocId && guessedCompositeId && guessedCompositeId.includes('_')) {
+          const [fId, cod] = guessedCompositeId.split('_');
+          const qComp = query(
+            collection(db, "users"),
+            where("franquiaId", "==", fId),
+            where("codigo", "==", cod),
+            limit(1)
+          );
+          const querySnapComp = await getDocs(qComp);
+          if (!querySnapComp.empty) {
+            const snap = querySnapComp.docs[0];
+            targetDocId = snap.id;
+            
+            // HANDSHAKE: Update UID if found via composite fields
+            if (snap.data().uid !== user.uid) {
+              console.log(`Handshake (via composite fields): Updating UID for ${targetDocId}`);
+              await updateDoc(doc(db, "users", targetDocId), { uid: user.uid });
+            }
+          }
+        }
+
+        // 3. Fallback 2: Search by email (Most reliable if compositeId guess fails)
+        if (!targetDocId && email) {
+          const qEmail = query(collection(db, "users"), where("email", "==", email), limit(1));
+          const querySnapEmail = await getDocs(qEmail);
+          if (!querySnapEmail.empty) {
+            const snap = querySnapEmail.docs[0];
+            targetDocId = snap.id;
+            
+            // HANDSHAKE: Update UID if found via email
+            if (snap.data().uid !== user.uid) {
+              console.log(`Handshake (via email): Updating UID for ${targetDocId}`);
+              await updateDoc(doc(db, "users", targetDocId), { uid: user.uid });
+            }
+          }
+        }
+
+        // 3. Fallback 2: Search by codigo AND email (Safe and allowed by rules)
+        // This handles cases where the franquiaId in the ID doesn't match the email domain.
+        if (!targetDocId && prefix && /^\d+$/.test(prefix)) {
+          const qCodigo = query(
+            collection(db, "users"), 
+            where("codigo", "==", prefix), 
+            where("email", "==", email),
+            limit(1)
+          );
+          const querySnapCodigo = await getDocs(qCodigo);
+          if (!querySnapCodigo.empty) {
+            const snap = querySnapCodigo.docs[0];
+            targetDocId = snap.id;
+            
+            // HANDSHAKE: Update UID if found via codigo
+            if (snap.data().uid !== user.uid) {
+              console.log(`Handshake (via codigo): Updating UID for ${targetDocId}`);
+              await updateDoc(doc(db, "users", targetDocId), { uid: user.uid });
+            }
+          }
+        }
+ 
+        // 4. Fallback 3: Search by UID field (for Master/Staff or already linked accounts)
         if (!targetDocId) {
-          const q = query(collection(db, "users"), where("uid", "==", user.uid), limit(1));
-          const querySnap = await getDocs(q);
-          if (!querySnap.empty) {
-            targetDocId = querySnap.docs[0].id;
+          const qUid = query(collection(db, "users"), where("uid", "==", user.uid), limit(1));
+          const querySnapUid = await getDocs(qUid);
+          if (!querySnapUid.empty) {
+            targetDocId = querySnapUid.docs[0].id;
           }
         }
 

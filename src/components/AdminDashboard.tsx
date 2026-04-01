@@ -220,6 +220,39 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
+  const [syncAuthLoading, setSyncAuthLoading] = useState(false);
+  const [syncAuthReport, setSyncAuthReport] = useState<any>(null);
+
+  const handleRunSyncAuth = async () => {
+    if (!confirm("Isso irá atualizar o e-mail de TODOS os alunos no Firebase Auth para o novo padrão unidade_codigo@mult.com.br. Deseja continuar?")) return;
+    setSyncAuthLoading(true);
+    setSyncAuthReport(null);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const response = await fetch("/api/maintenance/sync-auth", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao sincronizar autenticação");
+      }
+
+      const data = await response.json();
+      setSyncAuthReport(data.report);
+      alert(`Sincronização concluída! ${data.report.updated} alunos atualizados.`);
+    } catch (err: any) {
+      console.error("Erro na sincronização:", err);
+      alert("Erro na sincronização: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setSyncAuthLoading(false);
+    }
+  };
+
   const [selectedMissionForView, setSelectedMissionForView] = useState<Mission | null>(null);
   
   // Form states
@@ -1713,6 +1746,48 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
               </div>
             </motion.div>
           )}
+
+          <div className="glass-card p-8 border-neon-blue/20 bg-neon-blue/5">
+            <div className="flex items-start gap-6">
+              <div className="w-16 h-16 rounded-2xl bg-neon-blue/20 flex items-center justify-center text-neon-blue shrink-0 border border-neon-blue/30">
+                <ShieldCheck className="w-8 h-8" />
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter tracking-widest">Sincronizar Autenticação</h2>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Atualiza o e-mail de todos os alunos no Firebase Auth para o novo padrão (unidade_codigo@mult.com.br).
+                  </p>
+                </div>
+                
+                <div className="pt-4 flex flex-col gap-4">
+                  <button
+                    onClick={handleRunSyncAuth}
+                    disabled={syncAuthLoading}
+                    className="bg-neon-blue hover:bg-neon-blue/80 text-black font-black py-4 px-8 rounded-xl transition-all neon-glow-blue text-xs uppercase tracking-widest flex items-center gap-3 disabled:opacity-50 w-fit"
+                  >
+                    {syncAuthLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <ShieldCheck className="w-5 h-5" />
+                    )}
+                    Iniciar Sincronização Global
+                  </button>
+
+                  {syncAuthReport && (
+                    <div className="p-4 bg-black/40 rounded-xl border border-white/5 max-w-md">
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Relatório de Sincronização</p>
+                      <div className="flex gap-4">
+                        <p className="text-xs text-white">Total: <span className="font-black">{syncAuthReport.total}</span></p>
+                        <p className="text-xs text-green-400">Atualizados: <span className="font-black">{syncAuthReport.updated}</span></p>
+                        <p className="text-xs text-red-400">Erros: <span className="font-black">{syncAuthReport.errors}</span></p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
 
           <div className="glass-card p-8 border-mult-orange/20 bg-mult-orange/5">
             <div className="flex items-start gap-6">

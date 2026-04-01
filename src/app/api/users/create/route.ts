@@ -56,8 +56,11 @@ export async function POST(request: Request) {
       : null;
 
     let finalEmail = email?.trim();
-    if (role === "aluno" && !finalEmail && codigo) {
-      finalEmail = `${codigo.trim()}@mult.com.br`;
+    if (role === "aluno" && codigo && franquiaId) {
+      // NOVO PADRÃO: O e-mail de login deve ser unidade_codigo@mult.com.br para garantir unicidade e identificação
+      finalEmail = `${franquiaId.trim()}_${codigo.trim()}@mult.com.br`.toLowerCase().replace(/\s+/g, "");
+    } else if (role === "aluno" && !finalEmail && codigo) {
+      finalEmail = `${codigo.trim()}@mult.com.br`.toLowerCase();
     }
 
     if (!finalEmail || !finalEmail.includes("@")) {

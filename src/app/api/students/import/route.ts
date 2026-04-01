@@ -69,9 +69,12 @@ export async function POST(request: Request) {
             return;
           }
 
-          let finalEmail = email?.trim();
-          if (!finalEmail && codigo) {
-            finalEmail = `${codigo.trim()}@mult.com.br`;
+          let finalEmail = email?.trim().toLowerCase();
+          // NOVO PADRÃO: O e-mail de login deve ser unidade_codigo@mult.com.br para garantir unicidade e identificação
+          if (codigo && franquiaId) {
+            finalEmail = `${franquiaId.trim()}_${codigo.trim()}@mult.com.br`.toLowerCase().replace(/\s+/g, "");
+          } else if (!finalEmail && codigo) {
+            finalEmail = `${codigo.trim()}@mult.com.br`.toLowerCase();
           }
 
           // Composite ID for students
@@ -120,37 +123,24 @@ export async function POST(request: Request) {
           }
 
           if (userRef && userData) {
-            // Update existing user
+            // Update existing user in Firestore
             await userRef.update({
               franquiaId: franquiaId,
+              email: finalEmail, // Update to new standard email
               turma: turma || userData.turma || "024inf"
             });
 
-            // FORCE PASSWORD UPDATE in Firebase Auth for re-imported students
+            // Update user in Firebase Auth if UID exists
             if (userData.uid) {
               try {
                 await adminAuth.updateUser(userData.uid, {
+                  email: finalEmail,
                   password: senha || String(codigo) || "nome123"
                 });
-                console.log(`Password updated for existing student: ${userData.uid}`);
+                console.log(`Auth updated for existing student: ${userData.uid} to ${finalEmail}`);
               } catch (authErr) {
-                console.error(`Error updating password for student ${userData.uid}:`, authErr);
+                console.error(`Error updating Auth for student ${userData.uid}:`, authErr);
               }
-            }
-
-            // Add/Update enrollment
-            const enrollmentRef = userRef.collection("enrollments").doc(courseId);
-            const enrollmentSnap = await enrollmentRef.get();
-
-            if (!enrollmentSnap.exists) {
-              await enrollmentRef.set({
-                courseId,
-                courseName,
-                currentLesson: 1,
-                status: "ativo",
-                enrolledAt: new Date().toISOString(),
-                unlockedBadges: []
-              });
             }
             results.success++;
             return;
