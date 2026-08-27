@@ -126,8 +126,10 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [activityStatusFilter, setActivityStatusFilter] = useState<string>("all");
   const [resolvedUsers, setResolvedUsers] = useState<Record<string, UserProfile>>({});
 
-  // Estado do Backup
+  // Estados do Backup e Carga Supabase
   const [backupLoading, setBackupLoading] = useState(false);
+  const [importingToSupabase, setImportingToSupabase] = useState(false);
+  const [supabaseImportReport, setSupabaseImportReport] = useState<any>(null);
 
   // Global Counts
   const [counts, setCounts] = useState({
@@ -161,7 +163,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [diagnoseName, setDiagnoseName] = useState("");
   const [showRelinkConfirm, setShowRelinkConfirm] = useState(false);
 
-  // Função de Backup 100% Client-Side via Firestore SDK
+  // Backup Client-Side
   const handleDownloadBackup = async () => {
     setBackupLoading(true);
     try {
@@ -209,6 +211,39 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       alert("Erro no backup: " + (err.message || "Erro desconhecido"));
     } finally {
       setBackupLoading(false);
+    }
+  };
+
+  // Carga do Backup no Supabase
+  const handleUploadBackupToSupabase = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportingToSupabase(true);
+    setSupabaseImportReport(null);
+
+    try {
+      const text = await file.text();
+      const jsonData = JSON.parse(text);
+
+      const res = await fetch("/api/maintenance/import-backup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(jsonData),
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Erro na importação");
+
+      setSupabaseImportReport(result.report);
+      setSuccessMsg("Dados carregados com sucesso no Supabase!");
+      setTimeout(() => setSuccessMsg(""), 5000);
+    } catch (err: any) {
+      console.error("Erro na importação para Supabase:", err);
+      alert("Erro na importação: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setImportingToSupabase(false);
+      e.target.value = "";
     }
   };
 
@@ -1573,6 +1608,57 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             </div>
           </div>
 
+          {/* Módulo de Carga no Supabase */}
+          <div className="glass-card p-8 border-neon-blue/20 bg-neon-blue/5">
+            <div className="flex items-start gap-6">
+              <div className="w-16 h-16 rounded-2xl bg-neon-blue/20 flex items-center justify-center text-neon-blue shrink-0 border border-neon-blue/30">
+                <Upload className="w-8 h-8" />
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Carregar Backup no Supabase</h2>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Selecione o arquivo JSON de backup baixado para popular todas as tabelas relacionais do PostgreSQL.
+                  </p>
+                </div>
+                
+                <div className="pt-4 flex items-center gap-4">
+                  <input
+                    type="file"
+                    accept=".json"
+                    id="supabase-backup-upload"
+                    className="hidden"
+                    onChange={handleUploadBackupToSupabase}
+                    disabled={importingToSupabase}
+                  />
+                  <label
+                    htmlFor="supabase-backup-upload"
+                    className="cursor-pointer bg-neon-blue hover:bg-neon-blue/80 text-black font-black py-4 px-8 rounded-xl transition-all neon-glow-blue text-xs uppercase tracking-widest flex items-center gap-3"
+                  >
+                    {importingToSupabase ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Upload className="w-5 h-5" />
+                    )}
+                    {importingToSupabase ? "Processando e Inserindo no Supabase..." : "Selecionar Arquivo JSON e Importar"}
+                  </label>
+                </div>
+
+                {supabaseImportReport && (
+                  <div className="p-4 bg-black/60 rounded-xl border border-white/5 space-y-2 mt-4 text-xs font-mono">
+                    <p className="text-green-400 font-bold">Relatório de Carga:</p>
+                    <p>Franquias: {supabaseImportReport.franquias?.inserted}/{supabaseImportReport.franquias?.total}</p>
+                    <p>Usuários: {supabaseImportReport.users?.inserted}/{supabaseImportReport.users?.total}</p>
+                    <p>Missões: {supabaseImportReport.missions?.inserted}/{supabaseImportReport.missions?.total}</p>
+                    <p>Empresas: {supabaseImportReport.companies?.inserted}/{supabaseImportReport.companies?.total}</p>
+                    <p>Vagas: {supabaseImportReport.job_postings?.inserted}/{supabaseImportReport.job_postings?.total}</p>
+                    <p>Candidaturas: {supabaseImportReport.applications?.inserted}/{supabaseImportReport.applications?.total}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="glass-card p-8 border-neon-blue/20 bg-neon-blue/5">
             <div className="flex items-start gap-6">
               <div className="w-16 h-16 rounded-2xl bg-neon-blue/20 flex items-center justify-center text-neon-blue shrink-0 border border-neon-blue/30">
@@ -2561,7 +2647,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ opacity: 1, scale: 1 }}
+              animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
               className="glass-card max-w-md w-full p-8 border-red-500/50"
             >
@@ -2607,8 +2693,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
               className="glass-card max-w-md w-full p-8 border-mult-orange/50"
             >
               <div className="flex flex-col items-center text-center space-y-6">
