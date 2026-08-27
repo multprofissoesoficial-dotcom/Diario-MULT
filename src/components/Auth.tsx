@@ -16,6 +16,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Rocket, Mail, Lock, Loader2, AlertCircle, ShieldCheck } from "lucide-react";
 
 export default function Auth() {
+  const ({ onSeedClick }: { onSeedClick?: () => void })
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
