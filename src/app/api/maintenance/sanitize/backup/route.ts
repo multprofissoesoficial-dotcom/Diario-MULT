@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb, adminAuth } from "@/lib/firebase-admin";
+import { adminAuth, adminDb } from "@/lib/firebase-admin";
 
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const token = authHeader.split("Bearer ")[1];
-    const decoded = await adminAuth.verifyIdToken(token);
+    const idToken = authHeader.split("Bearer ")[1];
+    const decodedToken = await adminAuth.verifyIdToken(idToken);
 
-    // Validação de segurança Master
-    if (decoded.email !== "faustodv@gmail.com" && decoded.email !== "multprofissoesoficial@gmail.com") {
-      return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
+    const userDoc = await adminDb.collection("users").doc(decodedToken.uid).get();
+    const userData = userDoc.data();
+
+    if (userData?.role !== "master" && decodedToken.email !== "multprofissoesoficial@gmail.com" && decodedToken.email !== "faustodv@gmail.com") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const colecoes = [
@@ -29,22 +31,25 @@ export async function GET(req: NextRequest) {
     const backupCompleto: Record<string, any[]> = {};
 
     for (const col of colecoes) {
-      const snap = await adminDb.collection(col).get();
-      backupCompleto[col] = snap.docs.map(d => ({
-        _id: d.id,
-        ...d.data()
-      }));
+      try {
+        const snap = await adminDb.collection(col).get();
+        backupCompleto[col] = snap.docs.map((d) => ({
+          _id: d.id,
+          ...d.data(),
+        }));
+      } catch (err: any) {
+        console.warn(`Erro ao exportar coleção ${col}:`, err.message);
+        backupCompleto[col] = [];
+      }
     }
 
-    // Retorna o JSON completo para download
-    return new NextResponse(JSON.stringify(backupCompleto, null, 2), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Disposition": `attachment; filename=backup_mult_${new Date().toISOString().split('T')[0]}.json`
-      }
+    return NextResponse.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      data: backupCompleto
     });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("Erro no endpoint de backup:", error);
+    return NextResponse.json({ error: error.message || "Erro interno" }, { status: 500 });
   }
 }
