@@ -163,12 +163,12 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
         .eq("aluno_id", profile.id);
 
       if (data && data.length > 0) {
-        const list: Enrollment[] = data.map((e: any) => ({
+        const list = data.map((e: any) => ({
           courseId: e.course_id,
           courseName: e.course_name || "Informática Profissional",
           currentLesson: e.current_lesson || 1,
           unlockedBadges: e.unlocked_badges || []
-        }));
+        })) as any[];
         setEnrollments(list);
 
         const active = list.find(e => e.courseId === profile.currentCourseId) || list[0] || null;
