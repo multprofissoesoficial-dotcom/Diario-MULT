@@ -128,7 +128,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
           closingForecast: j.closing_forecast,
           selectionProcessType: j.selection_process_type,
           createdAt: j.created_at
-        })));
+        })) as any);
       }
 
       const { data: appData } = await supabase
