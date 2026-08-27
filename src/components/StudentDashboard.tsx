@@ -1,9 +1,6 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { collection, addDoc, query, where, orderBy, onSnapshot, doc, updateDoc, arrayUnion, serverTimestamp, getDocs } from "firebase/firestore";
-import { db, storage } from "../firebase";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { UserProfile, Mission, Badge, SkillTag, JobPosting, Application, Enrollment, Course } from "../types";
 import { RANKS, BADGES } from "../constants";
 import { getAbsoluteLessonId, getRelativeLesson, getLessonsForModule } from "../utils/lessonMapper";
@@ -25,8 +22,9 @@ import {
   FileText
 } from "lucide-react";
 import { fireConfetti } from "../lib/confetti";
-import { cn, handleFirestoreError, OperationType, sanitizeText } from "../lib/utils";
+import { cn, sanitizeText } from "../lib/utils";
 import { auth } from "../firebase";
+import { supabase } from "../lib/supabase";
 
 const iconMap: Record<string, React.ElementType> = {
   Rocket,
@@ -83,83 +81,160 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
   const [userApplications, setUserApplications] = useState<Application[]>([]);
   const [applyingJobId, setApplyingJobId] = useState<string | null>(null);
 
+  // 1. Carregar Dados Ativos do Curso no Supabase
   useEffect(() => {
-    if (profile.currentCourseId) {
-      const unsub = onSnapshot(doc(db, "courses", profile.currentCourseId), (snap) => {
-        if (snap.exists()) {
-          setActiveCourse({ id: snap.id, ...snap.data() } as Course);
+    const fetchCourse = async () => {
+      if (profile.currentCourseId) {
+        const { data, error } = await supabase
+          .from("cursos")
+          .select("*")
+          .eq("id", profile.currentCourseId)
+          .single();
+
+        if (data && !error) {
+          setActiveCourse({
+            id: data.id,
+            title: data.title,
+            description: data.description,
+            badges: data.badges || []
+          });
         }
-      });
-      return () => unsub();
-    }
+      }
+    };
+    fetchCourse();
   }, [profile.currentCourseId]);
 
+  // 2. Carregar Vagas e Candidaturas do Supabase
   useEffect(() => {
-    if (!profile.id || profile.uid !== auth.currentUser?.uid) return;
+    const fetchAtsData = async () => {
+      if (!profile.id) return;
 
-    // Fetch Jobs - Multitenancy: Filter by franquiaId
-    const jobsQuery = query(
-      collection(db, "job_postings"), 
-      where("status", "==", "aberta"),
-      where("franquiaId", "==", profile.franquiaId)
-    );
-    const unsubJobs = onSnapshot(jobsQuery, (snap) => {
-      setJobs(snap.docs.map(d => ({ id: d.id, ...d.data() } as JobPosting)));
-    }, (err) => handleFirestoreError(err, OperationType.GET, "job_postings"));
+      // Buscar Vagas abertas da mesma franquia
+      const { data: jobData } = await supabase
+        .from("vagas")
+        .select("*, empresas(name)")
+        .eq("status", "aberta")
+        .eq("franquia_id", profile.franquiaId || "rio-verde");
 
-    // Fetch User Applications
-    const appsQuery = query(collection(db, "applications"), where("studentId", "in", [profile.id, profile.uid]));
-    const unsubApps = onSnapshot(appsQuery, (snap) => {
-      setUserApplications(snap.docs.map(d => ({ id: d.id, ...d.data() } as Application)));
-    }, (err) => handleFirestoreError(err, OperationType.GET, "applications"));
-
-    return () => {
-      unsubJobs();
-      unsubApps();
-    };
-  }, [profile.id, profile.uid, profile.franquiaId]);
-
-  useEffect(() => {
-    if (!profile.id || profile.uid !== auth.currentUser?.uid) return;
-
-    const enrollmentsRef = collection(db, "users", profile.id, "enrollments");
-    const unsubEnrollments = onSnapshot(enrollmentsRef, (snap) => {
-      const list = snap.docs.map(d => d.data() as Enrollment);
-      setEnrollments(list);
-      
-      const active = list.find(e => e.courseId === profile.currentCourseId) || list[0] || null;
-      setActiveEnrollment(active);
-      
-      if (active) {
-        const { module: m, relativeLesson: l } = getRelativeLesson(active.currentLesson);
-        setModule(m);
-        setClassNum(l);
+      if (jobData) {
+        setJobs(jobData.map((j: any) => ({
+          id: j.id,
+          title: j.title,
+          companyId: j.company_id,
+          companyName: j.company_name || j.empresas?.name || "Empresa Parceira",
+          franquiaId: j.franquia_id,
+          description: j.description,
+          requiredSkills: j.required_skills || [],
+          status: j.status,
+          openingDate: j.opening_date,
+          closingForecast: j.closing_forecast,
+          selectionProcessType: j.selection_process_type,
+          createdAt: j.created_at
+        })));
       }
-    }, (err) => handleFirestoreError(err, OperationType.GET, `users/${profile.id}/enrollments`));
 
-    return () => unsubEnrollments();
-  }, [profile.id, profile.uid, profile.currentCourseId]);
+      // Buscar Candidaturas do Aluno
+      const { data: appData } = await supabase
+        .from("candidaturas")
+        .select("*")
+        .eq("student_id", profile.id);
 
+      if (appData) {
+        setUserApplications(appData.map((a: any) => ({
+          id: a.id,
+          jobId: a.job_id,
+          studentId: a.student_id,
+          matchScore: a.match_score,
+          status: a.status,
+          statusHistory: a.status_history || [],
+          appliedAt: a.applied_at
+        })));
+      }
+    };
+
+    fetchAtsData();
+  }, [profile.id, profile.franquiaId]);
+
+  // 3. Carregar Matrículas do Aluno via Supabase
   useEffect(() => {
-    if (!profile.id || profile.uid !== auth.currentUser?.uid) return;
+    const fetchEnrollments = async () => {
+      if (!profile.id) return;
 
-    const q = query(
-      collection(db, "missions"),
-      where("studentId", "in", [profile.id, profile.uid])
-    );
+      const { data } = await supabase
+        .from("matriculas")
+        .select("*")
+        .eq("aluno_id", profile.id);
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const missionData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Mission));
-      setMissions(missionData);
-      
-      // Check for new badges based on class completion
-      checkBadges(missionData);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, "missions");
-    });
+      if (data && data.length > 0) {
+        const list: Enrollment[] = data.map((e: any) => ({
+          courseId: e.course_id,
+          courseName: e.course_name || "Informática Profissional",
+          currentLesson: e.current_lesson || 1,
+          unlockedBadges: e.unlocked_badges || []
+        }));
+        setEnrollments(list);
 
-    return () => unsubscribe();
-  }, [profile.id, profile.uid]);
+        const active = list.find(e => e.courseId === profile.currentCourseId) || list[0] || null;
+        setActiveEnrollment(active);
+
+        if (active) {
+          const { module: m, relativeLesson: l } = getRelativeLesson(active.currentLesson);
+          setModule(m);
+          setClassNum(l);
+        }
+      } else {
+        // Criar matrícula padrão se não existir
+        const defaultEnrollment: Enrollment = {
+          courseId: profile.currentCourseId || "INF",
+          courseName: "Informática Profissional",
+          currentLesson: 1,
+          unlockedBadges: profile.unlockedBadges || []
+        };
+        setEnrollments([defaultEnrollment]);
+        setActiveEnrollment(defaultEnrollment);
+      }
+    };
+
+    fetchEnrollments();
+  }, [profile.id, profile.currentCourseId]);
+
+  // 4. Carregar Missões do Aluno via Supabase
+  useEffect(() => {
+    const fetchMissions = async () => {
+      if (!profile.id) return;
+
+      const { data, error } = await supabase
+        .from("missoes")
+        .select("*")
+        .eq("student_id", profile.id)
+        .order("created_at", { ascending: false });
+
+      if (data && !error) {
+        const missionData: Mission[] = data.map((m: any) => ({
+          id: m.id,
+          studentId: m.student_id,
+          studentName: m.student_name,
+          franquiaId: m.franquia_id,
+          turma: m.turma,
+          courseId: m.course_id,
+          courseName: m.course_name,
+          module: m.module,
+          classNum: m.class_num,
+          content: m.content,
+          status: m.status,
+          aiFeedback: m.ai_feedback,
+          xpAwarded: m.xp_awarded || 0,
+          createdAt: m.created_at,
+          approvedAt: m.approved_at,
+          approvedBy: m.approved_by
+        }));
+        setMissions(missionData);
+        checkBadges(missionData);
+      }
+    };
+
+    fetchMissions();
+  }, [profile.id]);
 
   const checkBadges = async (missionData: Mission[]) => {
     const approvedMissions = missionData.filter(m => m.status !== "pending");
@@ -172,22 +247,24 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     );
 
     if (newBadges.length > 0) {
-      const userRef = doc(db, "users", profile.id);
-      const courseId = activeEnrollment?.courseId || "INF";
-      
-      // Senior Audit: Removed legacy profile check to allow badge updates
-      await updateDoc(userRef, {
-        unlockedBadges: arrayUnion(...newBadges.map(b => b.id))
-      });
+      const newBadgeIds = newBadges.map(b => b.id);
+      const updatedBadges = Array.from(new Set([...(profile.unlockedBadges || []), ...newBadgeIds]));
 
-      // Also update enrollment badges
-      await updateDoc(doc(db, "users", profile.id, "enrollments", courseId), {
-        unlockedBadges: arrayUnion(...newBadges.map(b => b.id))
-      });
+      // Atualizar no Supabase (tabela usuarios)
+      await supabase
+        .from("usuarios")
+        .update({ unlocked_badges: updatedBadges })
+        .eq("id", profile.id);
+
+      const courseId = activeEnrollment?.courseId || "INF";
+      await supabase
+        .from("matriculas")
+        .update({ unlocked_badges: updatedBadges })
+        .eq("aluno_id", profile.id)
+        .eq("course_id", courseId);
       
-      // Show the first new badge in a special modal
       setNewBadge(newBadges[0]);
-      fireConfetti(); // Special confetti for medals
+      fireConfetti();
     }
   };
 
@@ -200,47 +277,70 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
 
     const sanitizedContent = sanitizeText(content);
 
-    // Simulate AI analysis
     setTimeout(async () => {
       let feedback = "Excelente registro! Vi que você dominou habilidades cruciais hoje. Continue assim!";
-      const lowerContent = sanitizedContent.toLowerCase();
-      if (lowerContent.includes("drive") || lowerContent.includes("email") || lowerContent.includes("planilha")) {
-        feedback = "Excelente registro! Vi que você dominou habilidades cruciais hoje. Continue assim!";
-      }
 
-    try {
-          const courseId = activeEnrollment?.courseId || "INF";
-          const courseName = activeEnrollment?.courseName || "Informática Profissional";
-          const absLesson = getAbsoluteLessonId(module, classNum);
+      try {
+        const courseId = activeEnrollment?.courseId || "INF";
+        const courseName = activeEnrollment?.courseName || "Informática Profissional";
+        const absLesson = getAbsoluteLessonId(module, classNum);
 
-          await addDoc(collection(db, "missions"), {
-            studentId: profile.id,
-            studentName: profile.displayName,
-            franquiaId: profile.franquiaId || "rio-verde",
+        // Inserir missão no Supabase
+        const { data: newMission, error } = await supabase
+          .from("missoes")
+          .insert({
+            student_id: profile.id,
+            student_name: profile.displayName,
+            franquia_id: profile.franquiaId || "rio-verde",
             turma: profile.turma || "024inf",
-            courseId,
-            courseName,
+            course_id: courseId,
+            course_name: courseName,
             module,
-            classNum: absLesson,
+            class_num: absLesson,
             content: sanitizedContent,
             status: "pending",
-            aiFeedback: feedback,
-            createdAt: new Date().toISOString(),
-          });
+            ai_feedback: feedback,
+            xp_awarded: 0
+          })
+          .select()
+          .single();
 
-          // Update currentLesson in enrollment
-          if (activeEnrollment && absLesson > activeEnrollment.currentLesson) {
-            await updateDoc(doc(db, "users", profile.id, "enrollments", courseId), {
-              currentLesson: absLesson
-            });
-          }
+        if (error) throw error;
+
+        if (newMission) {
+          setMissions(prev => [{
+            id: newMission.id,
+            studentId: newMission.student_id,
+            studentName: newMission.student_name,
+            franquiaId: newMission.franquia_id,
+            turma: newMission.turma,
+            courseId: newMission.course_id,
+            courseName: newMission.course_name,
+            module: newMission.module,
+            classNum: newMission.class_num,
+            content: newMission.content,
+            status: newMission.status,
+            aiFeedback: newMission.ai_feedback,
+            xpAwarded: newMission.xp_awarded,
+            createdAt: newMission.created_at
+          }, ...prev]);
+        }
+
+        // Atualizar aula atual na matrícula se for superior
+        if (activeEnrollment && absLesson > activeEnrollment.currentLesson) {
+          await supabase
+            .from("matriculas")
+            .update({ current_lesson: absLesson })
+            .eq("aluno_id", profile.id)
+            .eq("course_id", courseId);
+        }
 
         fireConfetti();
         setContent("");
         setAiFeedback(feedback);
         setTimeout(() => setAiFeedback(null), 5000);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, "missions");
+      } catch (err: any) {
+        alert("Erro ao enviar missão: " + err.message);
       } finally {
         setLoading(false);
       }
@@ -253,22 +353,27 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     try {
       let resumeUrl = profile.resumeUrl || "";
 
+      // Nota: Mantém o storage do Firebase para PDFs de currículo por enquanto, ou integra com Supabase Storage se desejado
       if (resumeFile) {
         if (resumeFile.size > 5 * 1024 * 1024) {
           alert("O currículo deve ter no máximo 5MB.");
           setUploadingProfile(false);
           return;
         }
-        const resumeRef = ref(storage, `resumes/${profile.uid}/curriculo.pdf`);
+        const { ref: storageRef, uploadBytes, getDownloadURL } = await import("firebase/storage");
+        const { storage } = await import("../firebase");
+        const resumeRef = storageRef(storage, `resumes/${profile.uid}/curriculo.pdf`);
         await uploadBytes(resumeRef, resumeFile);
         resumeUrl = await getDownloadURL(resumeRef);
       }
 
-      const userRef = doc(db, "users", profile.id);
-      await updateDoc(userRef, {
-        skills: selectedSkills,
-        resumeUrl: resumeUrl
-      });
+      await supabase
+        .from("usuarios")
+        .update({
+          skills: selectedSkills,
+          resume_url: resumeUrl
+        })
+        .eq("id", profile.id);
 
       alert("Perfil profissional atualizado com sucesso!");
     } catch (error) {
@@ -285,31 +390,48 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
       return;
     }
 
-    if (!profile.skills || profile.skills.length === 0) {
+    if (!selectedSkills || selectedSkills.length === 0) {
       alert("Por favor, preencha suas habilidades no perfil profissional antes de se candidatar.");
       return;
     }
 
     setApplyingJobId(job.id);
     try {
-      // Motor de Match Matemático
       const studentSkills = selectedSkills;
       const requiredSkills = job.requiredSkills;
       
       const commonSkills = studentSkills.filter(skill => requiredSkills.includes(skill));
-      const score = Math.round((commonSkills.length / requiredSkills.length) * 100);
+      const score = requiredSkills.length > 0 ? Math.round((commonSkills.length / requiredSkills.length) * 100) : 100;
 
-      await addDoc(collection(db, "applications"), {
-        jobId: job.id,
-        studentId: profile.id,
-        matchScore: score,
-        status: 'pendente',
-        appliedAt: serverTimestamp()
-      });
+      const { data, error } = await supabase
+        .from("candidaturas")
+        .insert({
+          job_id: job.id,
+          student_id: profile.id,
+          match_score: score,
+          status: 'pendente',
+          status_history: [{ status: 'pendente', timestamp: new Date().toISOString() }]
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        setUserApplications(prev => [...prev, {
+          id: data.id,
+          jobId: data.job_id,
+          studentId: data.student_id,
+          matchScore: data.match_score,
+          status: data.status,
+          statusHistory: data.status_history,
+          appliedAt: data.applied_at
+        }]);
+      }
 
       alert(`Candidatura enviada! Seu Match Score é ${score}%.`);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, "applications");
+    } catch (error: any) {
+      alert("Erro ao enviar candidatura: " + error.message);
     } finally {
       setApplyingJobId(null);
     }
@@ -324,12 +446,17 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     if (!acceptTerms) return;
     setLoadingTerms(true);
     try {
-      await updateDoc(doc(db, "users", profile.id), {
-        atsTermsAccepted: true,
-        atsTermsAcceptedAt: serverTimestamp()
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, "users");
+      await supabase
+        .from("usuarios")
+        .update({
+          ats_terms_accepted: true,
+          ats_terms_accepted_at: new Date().toISOString()
+        })
+        .eq("id", profile.id);
+
+      window.location.reload();
+    } catch (error: any) {
+      alert("Erro ao aceitar termos: " + error.message);
     } finally {
       setLoadingTerms(false);
     }
@@ -404,9 +531,8 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
             <select 
               value={profile.currentCourseId}
               onChange={async (e) => {
-                await updateDoc(doc(db, "users", profile.id), {
-                  currentCourseId: e.target.value
-                });
+                await supabase.from("usuarios").update({ current_course_id: e.target.value }).eq("id", profile.id);
+                window.location.reload();
               }}
               className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[10px] font-black uppercase tracking-widest focus:outline-none focus:border-neon-blue transition-all mr-2"
             >
@@ -543,7 +669,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
                     value={module}
                     onChange={(e) => {
                       setModule(e.target.value);
-                      setClassNum(1); // Reset class when module changes
+                      setClassNum(1);
                     }}
                     className="w-full bg-white/5 border border-white/10 rounded-lg p-3 focus:outline-none focus:border-neon-blue text-white"
                   >
@@ -872,6 +998,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
           )}
         </AnimatePresence>
       )}
+
       {/* Mission Detail Modal */}
       <AnimatePresence>
         {selectedMission && (
