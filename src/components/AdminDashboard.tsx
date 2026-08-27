@@ -76,7 +76,8 @@ import {
   XCircle,
   Calendar,
   BookOpen,
-  Settings
+  Settings,
+  Download
 } from "lucide-react";
 
 export default function AdminDashboard({ profile }: { profile: UserProfile }) {
@@ -125,6 +126,9 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [activityStatusFilter, setActivityStatusFilter] = useState<string>("all");
   const [resolvedUsers, setResolvedUsers] = useState<Record<string, UserProfile>>({});
 
+  // Backup State
+  const [backupLoading, setBackupLoading] = useState(false);
+
   // Global Counts
   const [counts, setCounts] = useState({
     users: {
@@ -156,6 +160,38 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [diagnoseReport, setDiagnoseReport] = useState<any>(null);
   const [diagnoseName, setDiagnoseName] = useState("");
   const [showRelinkConfirm, setShowRelinkConfirm] = useState(false);
+
+  const handleDownloadBackup = async () => {
+    setBackupLoading(true);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch("/api/maintenance/backup", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Falha ao gerar backup");
+      }
+      
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `backup_mult_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      setSuccessMsg("Backup JSON baixado com sucesso!");
+      setTimeout(() => setSuccessMsg(""), 4000);
+    } catch (err: any) {
+      console.error("Erro no backup:", err);
+      alert("Erro no backup: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setBackupLoading(false);
+    }
+  };
 
   const handleRunRelink = async (dryRun = true) => {
     setRelinkLoading(true);
@@ -441,20 +477,17 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       }
 
       if (searchQuery) {
-        // Check if search query is a code (numeric)
         const isCode = /^\d+$/.test(searchQuery);
         
         if (isCode) {
           q = query(q, where("codigo", "==", searchQuery));
         } else {
-          // Server-side search logic for name
           q = query(q, 
             where("displayName", ">=", searchQuery),
             where("displayName", "<=", searchQuery + "\uf8ff")
           );
         }
       } else {
-        // If no search, we can order by displayName for consistency
         q = query(q, orderBy("displayName"));
       }
 
@@ -489,7 +522,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   };
 
   useEffect(() => {
-    // Listen to Pending Missions
     let q = query(collection(db, "missions"), where("status", "==", "pending"));
     
     if (profile.role !== "master") {
@@ -523,10 +555,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       if (activityStatusFilter !== "all") {
         q = query(q, where("status", "==", activityStatusFilter));
       }
-
-      // Date filtering in Firestore is complex with multiple where clauses.
-      // For now, we'll keep client-side filtering for dates and search if needed,
-      // but we limit the fetch.
 
       if (!reset && lastMissionDoc) {
         q = query(q, startAfter(lastMissionDoc));
@@ -565,7 +593,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       }
 
       for (const batch of batches) {
-        // 1. Try fetching by document ID
         const qId = query(collection(db, "users"), where("__name__", "in", batch));
         const snapId = await getDocs(qId);
         snapId.docs.forEach(d => {
@@ -574,7 +601,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           newResolved[data.uid] = data;
         });
 
-        // 2. Try fetching by uid field (for legacy missions)
         const qUid = query(collection(db, "users"), where("uid", "in", batch));
         const snapUid = await getDocs(qUid);
         snapUid.docs.forEach(d => {
@@ -659,9 +685,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   };
 
   const filteredUsers = users.filter(u => {
-    // Search is now handled server-side in fetchUsers for displayName.
-    // We can still keep a client-side check for email/codigo if they were already loaded,
-    // but the main search is now server-driven.
     const matchesSearch = !searchQuery || 
       u.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -686,14 +709,11 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     return matchesSearch && matchesStatus && matchesDate;
   });
 
-  // Pagination logic removed in favor of Load More
   const currentUsers = filteredUsers;
-  const totalPages = 1; // Not used anymore
 
   const handleClearAllStudents = async () => {
     setLoading(true);
     try {
-      // 1. Get all students
       let studentsQuery = query(collection(db, "users"), where("role", "==", "aluno"));
       if (profile.role !== "master") {
         studentsQuery = query(studentsQuery, where("franquiaId", "==", profile.franquiaId));
@@ -702,7 +722,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       }
       const studentsSnap = await getDocs(studentsQuery);
       
-      // 2. Get all missions (to be safe, we'll clear all missions since they belong to students)
       let missionsQuery = query(collection(db, "missions"));
       if (profile.role !== "master") {
         missionsQuery = query(missionsQuery, where("franquiaId", "==", profile.franquiaId));
@@ -715,14 +734,12 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       let deletedCount = 0;
       setImportProgress({ current: 0, total: totalToDelete });
 
-      // Delete students
       for (const studentDoc of studentsSnap.docs) {
         await deleteDoc(doc(db, "users", studentDoc.id));
         deletedCount++;
         setImportProgress(prev => ({ ...prev, current: deletedCount }));
       }
 
-      // Delete missions
       for (const missionDoc of missionsSnap.docs) {
         await deleteDoc(doc(db, "missions", missionDoc.id));
         deletedCount++;
@@ -972,14 +989,12 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     const xp = bonus ? XP_BONUS : XP_PER_MISSION;
 
     try {
-      // Find the student document ID by UID or direct ID (mission.studentId can be either)
       let studentDoc = await getDoc(doc(db, "users", mission.studentId));
       let studentDocId: string;
       
       if (studentDoc.exists()) {
         studentDocId = studentDoc.id;
       } else {
-        // Fallback to searching by UID (legacy)
         const q = query(collection(db, "users"), where("uid", "==", mission.studentId), limit(1));
         const studentSnap = await getDocs(q);
         if (studentSnap.empty) {
@@ -1000,10 +1015,9 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         })
       ]);
       
-      // Update local state
       setAllMissions(prev => prev.map(m => m.id === mission.id ? { ...m, status: bonus ? "bonus" : "approved", xpAwarded: xp } : m));
       setSelectedMissionForView(null);
-      fetchCounts(); // Refresh counts
+      fetchCounts();
       setSuccessMsg("Missão aprovada com sucesso!");
       setTimeout(() => setSuccessMsg(""), 3000);
     } catch (err: any) {
@@ -1022,10 +1036,9 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         rejectedBy: profile.uid
       });
       
-      // Update local state
       setAllMissions(prev => prev.map(m => m.id === mission.id ? { ...m, status: "rejected" } : m));
       setSelectedMissionForView(null);
-      fetchCounts(); // Refresh counts
+      fetchCounts();
       setSuccessMsg("Missão rejeitada.");
       setTimeout(() => setSuccessMsg(""), 3000);
     } catch (err) {
@@ -1034,6 +1047,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       setLoading(false);
     }
   };
+
   const handleRunSyncCounters = async () => {
     setSyncLoading(true);
     try {
@@ -1108,7 +1122,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       const result = await response.json();
       setMaintenanceReport(result.report);
       setShowMaintenanceConfirm(false);
-      fetchCounts(); // Refresh counts after cleanup
+      fetchCounts();
     } catch (err: any) {
       console.error("Erro na manutenção:", err);
       alert("Erro na manutenção: " + (err.message || "Erro desconhecido"));
@@ -1138,7 +1152,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       const result = await response.json();
       setCleanupReport(result.report);
       setShowCleanupConfirm(false);
-      fetchCounts(); // Refresh counts after cleanup
+      fetchCounts();
     } catch (err: any) {
       console.error("Erro na limpeza de legados:", err);
       alert("Erro na limpeza de legados: " + (err.message || "Erro desconhecido"));
@@ -1514,6 +1528,39 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         <CourseManager courses={courses} />
       ) : activeTab === "maintenance" ? (
         <div className="space-y-8">
+          
+          {/* Backup Module Section */}
+          <div className="glass-card p-8 border-green-500/20 bg-green-500/5">
+            <div className="flex items-start gap-6">
+              <div className="w-16 h-16 rounded-2xl bg-green-500/20 flex items-center justify-center text-green-400 shrink-0 border border-green-500/30">
+                <Download className="w-8 h-8" />
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Exportar Backup Completo (JSON)</h2>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Gera e faz o download de um arquivo JSON estruturado contendo todas as coleções do banco (Usuários, Missões, Vagas, Empresas, Candidaturas, Franquias e Cursos).
+                  </p>
+                </div>
+                
+                <div className="pt-4 flex items-center gap-4">
+                  <button
+                    onClick={handleDownloadBackup}
+                    disabled={backupLoading}
+                    className="bg-green-500 hover:bg-green-600 text-black font-black py-4 px-8 rounded-xl transition-all neon-glow-green text-xs uppercase tracking-widest flex items-center gap-3 disabled:opacity-50"
+                  >
+                    {backupLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Download className="w-5 h-5" />
+                    )}
+                    Baixar Backup JSON Completo
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="glass-card p-8 border-neon-blue/20 bg-neon-blue/5">
             <div className="flex items-start gap-6">
               <div className="w-16 h-16 rounded-2xl bg-neon-blue/20 flex items-center justify-center text-neon-blue shrink-0 border border-neon-blue/30">
@@ -1991,7 +2038,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           </div>
         </div>
         <div className="overflow-x-auto">
-          {/* Desktop Table */}
           <table className="hidden md:table w-full text-left border-collapse min-w-[600px]">
             <thead>
               <tr className="text-[10px] font-black text-gray-500 uppercase tracking-widest border-b border-white/5">
@@ -2178,8 +2224,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           )}
         </div>
 
-
-        {/* Load More */}
         {hasMore && (
           <div className="p-6 border-t border-white/5 bg-white/5 flex justify-center">
             <button 
@@ -2194,7 +2238,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       </div>
       ) : (
         <div className="space-y-6">
-          {/* Engagement Chart */}
           <div className="glass-card p-6">
             <div className="flex justify-between items-center mb-6">
               <div>
@@ -2387,7 +2430,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             </table>
           </div>
 
-          {/* Load More Missions */}
           {hasMoreMissions && (
             <div className="p-6 border-t border-white/5 bg-white/5 flex justify-center">
               <button 
