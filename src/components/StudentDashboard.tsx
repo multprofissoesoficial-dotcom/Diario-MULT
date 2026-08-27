@@ -108,7 +108,6 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     const fetchAtsData = async () => {
       if (!profile.id) return;
 
-      // Buscar Vagas abertas da mesma franquia
       const { data: jobData } = await supabase
         .from("vagas")
         .select("*, empresas(name)")
@@ -132,7 +131,6 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
         })));
       }
 
-      // Buscar Candidaturas do Aluno
       const { data: appData } = await supabase
         .from("candidaturas")
         .select("*")
@@ -182,7 +180,6 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
           setClassNum(l);
         }
       } else {
-        // Criar matrícula padrão se não existir
         const defaultEnrollment: Enrollment = {
           courseId: profile.currentCourseId || "INF",
           courseName: "Informática Profissional",
@@ -249,7 +246,6 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
       const newBadgeIds = newBadges.map(b => b.id);
       const updatedBadges = Array.from(new Set([...(profile.unlockedBadges || []), ...newBadgeIds]));
 
-      // Atualizar no Supabase (tabela usuarios)
       await supabase
         .from("usuarios")
         .update({ unlocked_badges: updatedBadges })
@@ -284,7 +280,6 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
         const courseName = activeEnrollment?.courseName || "Informática Profissional";
         const absLesson = getAbsoluteLessonId(module, classNum);
 
-        // Inserir missão no Supabase
         const { data: newMission, error } = await supabase
           .from("missoes")
           .insert({
@@ -325,7 +320,6 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
           }, ...prev]);
         }
 
-        // Atualizar aula atual na matrícula se for superior
         if (activeEnrollment && absLesson > activeEnrollment.currentLesson) {
           await supabase
             .from("matriculas")
@@ -352,7 +346,6 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     try {
       let resumeUrl = profile.resumeUrl || "";
 
-      // Nota: Mantém o storage do Firebase para PDFs de currículo por enquanto, ou integra com Supabase Storage se desejado
       if (resumeFile) {
         if (resumeFile.size > 5 * 1024 * 1024) {
           alert("O currículo deve ter no máximo 5MB.");
