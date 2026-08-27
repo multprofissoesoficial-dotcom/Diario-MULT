@@ -126,7 +126,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [activityStatusFilter, setActivityStatusFilter] = useState<string>("all");
   const [resolvedUsers, setResolvedUsers] = useState<Record<string, UserProfile>>({});
 
-  // Backup State
+  // Estado do Backup
   const [backupLoading, setBackupLoading] = useState(false);
 
   // Global Counts
@@ -166,24 +166,37 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     try {
       const token = await auth.currentUser?.getIdToken();
       const res = await fetch("/api/maintenance/backup", {
-        headers: { Authorization: `Bearer ${token}` }
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}` 
+        }
       });
       
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || "Falha ao gerar backup");
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        throw new Error(`Servidor respondeu com status ${res.status}. Verifique se a rota foi compilada.`);
       }
-      
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `backup_mult_${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-      setSuccessMsg("Backup JSON baixado com sucesso!");
+
+      const responseData = await res.json();
+      if (!res.ok || !responseData.success) {
+        throw new Error(responseData.error || "Falha ao gerar dados de backup");
+      }
+
+      const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(
+        JSON.stringify(responseData.data, null, 2)
+      )}`;
+      const downloadAnchor = document.createElement("a");
+      downloadAnchor.setAttribute("href", jsonString);
+      downloadAnchor.setAttribute(
+        "download",
+        `backup_mult_${new Date().toISOString().split("T")[0]}.json`
+      );
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+
+      setSuccessMsg("Backup JSON exportado com sucesso!");
       setTimeout(() => setSuccessMsg(""), 4000);
     } catch (err: any) {
       console.error("Erro no backup:", err);
@@ -306,7 +319,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [turmas, setTurmas] = useState<string[]>([]);
 
   useEffect(() => {
-    // Fetch unique turmas
     const fetchTurmas = async () => {
       try {
         let q = query(collection(db, "users"));
@@ -329,7 +341,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   }, [selectedFranquia, profile.franquiaId, profile.role]);
 
   useEffect(() => {
-    // Listen to Franquias
     const unsubFranquias = onSnapshot(collection(db, "franquias"), (snap) => {
       setFranquias(snap.docs.map(d => d.data() as Franquia));
     }, (err) => handleFirestoreError(err, OperationType.GET, "franquias"));
@@ -345,7 +356,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   }, []);
 
   useEffect(() => {
-    // Listen to Global Stats Metadata
     if (profile.role === "master" && selectedFranquia === "all") {
       const unsubStats = onSnapshot(doc(db, "metadata", "global_stats"), (snap) => {
         if (snap.exists()) {
@@ -372,7 +382,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   }, [selectedFranquia, profile.role]);
 
   useEffect(() => {
-    // Initial fetch of users
     fetchUsers(true);
   }, [selectedFranquia, profile.franquiaId, profile.role, roleFilter, turmaFilter, searchQuery]);
 
@@ -386,7 +395,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       const missionBaseQuery = collection(db, "missions");
       const jobBaseQuery = collection(db, "job_postings");
       const applicationBaseQuery = collection(db, "applications");
-
       const companyBaseQuery = collection(db, "companies");
 
       const getCount = async (base: any, filters: any[] = []) => {
@@ -460,14 +468,12 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     try {
       let q = query(collection(db, "users"));
       
-      // 1. Primary Filter: Franquia (Security Layer)
       if (profile.role !== "master") {
         q = query(q, where("franquiaId", "==", profile.franquiaId));
       } else if (selectedFranquia !== "all") {
         q = query(q, where("franquiaId", "==", selectedFranquia));
       }
 
-      // 2. Secondary Filters
       if (roleFilter !== "all") {
         q = query(q, where("role", "==", roleFilter));
       }
@@ -1529,7 +1535,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       ) : activeTab === "maintenance" ? (
         <div className="space-y-8">
           
-          {/* Backup Module Section */}
+          {/* Módulo de Backup JSON */}
           <div className="glass-card p-8 border-green-500/20 bg-green-500/5">
             <div className="flex items-start gap-6">
               <div className="w-16 h-16 rounded-2xl bg-green-500/20 flex items-center justify-center text-green-400 shrink-0 border border-green-500/30">
