@@ -180,12 +180,12 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
           setClassNum(l);
         }
      } else {
-        const defaultEnrollment = {
+        const defaultEnrollment: Enrollment = {
           courseId: profile.currentCourseId || "INF",
           courseName: "Informática Profissional",
           currentLesson: 1,
           unlockedBadges: profile.unlockedBadges || []
-        } as any;
+        } as unknown as Enrollment;
         setEnrollments([defaultEnrollment]);
         setActiveEnrollment(defaultEnrollment);
       }
