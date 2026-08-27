@@ -95,9 +95,8 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
           setActiveCourse({
             id: data.id,
             title: data.title,
-            description: data.description,
             badges: data.badges || []
-          });
+          } as any);
         }
       }
     };
