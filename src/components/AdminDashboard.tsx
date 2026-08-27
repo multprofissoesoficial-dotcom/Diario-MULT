@@ -61,6 +61,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importText, setImportText] = useState("");
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
+  const [importPreview, setImportPreview] = useState<any[]>([]);
   const [showEditUser, setShowEditUser] = useState<UserProfile | null>(null);
   const [showResetPasswordModal, setShowResetPasswordModal] = useState<UserProfile | null>(null);
   const [newPasswordForReset, setNewPasswordForReset] = useState("");
@@ -351,7 +352,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         approved_by: profile.uid
       }).eq("id", mission.id);
 
-      // Incremento de XP no usuário
       const { data: userCurrent } = await supabase.from("usuarios").select("xp").eq("id", mission.studentId).single();
       const currentXP = userCurrent?.xp || 0;
       await supabase.from("usuarios").update({ xp: currentXP + xp }).eq("id", mission.studentId);
@@ -383,6 +383,99 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       setTimeout(() => setSuccessMsg(""), 3000);
     } catch (err: any) {
       alert("Erro ao rejeitar missão: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Funcionalidade de Importação em Lotes por CSV (Restaurada)
+  const handlePreviewImport = () => {
+    if (!importText.trim()) return;
+    const results = Papa.parse(importText, { 
+      header: true, 
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim(),
+      delimitersToGuess: [',', ';', '\t', '|']
+    });
+    setImportPreview(results.data as any[]);
+  };
+
+  const handleImportStudents = async () => {
+    if (!importText.trim()) return;
+    setLoading(true);
+    setSuccessMsg("");
+    
+    const results = Papa.parse(importText, { 
+      header: true, 
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim(),
+      delimitersToGuess: [',', ';', '\t', '|']
+    });
+    
+    const rows = results.data as any[];
+    if (rows.length === 0) {
+      alert("Nenhum dado válido detectado. Verifique se o cabeçalho está correto.");
+      setLoading(false);
+      return;
+    }
+
+    const studentsToImport = rows.map(row => {
+      const nome = row["Nome Completo"] || row["nome"];
+      const codigo = row["Código"] || row["codigo"] || row["Matrícula"] || row["matricula"];
+      const email = row["Email"] || row["email"];
+      const senha = row["Senha Temporária"] || row["senha"] || (codigo ? String(codigo) : "nome123");
+      const unidadeInput = row["Unidade"] || row["unidade"];
+      const turma = row["Turma"] || row["turma"];
+
+      let finalUnidadeId = unidadeInput;
+      const normalize = (s: string) => s.toLowerCase().replace(/[-_]/g, " ").trim();
+      const normalizedInput = normalize(unidadeInput || "");
+      
+      const foundFranquia = franquias.find(f => 
+        f.id === unidadeInput || 
+        normalize(f.nome) === normalizedInput ||
+        normalize(f.cidade) === normalizedInput
+      );
+      
+      if (foundFranquia) finalUnidadeId = foundFranquia.id;
+
+      return { nome, codigo, email, senha, franquiaId: finalUnidadeId, turma };
+    });
+
+    setImportProgress({ current: 0, total: studentsToImport.length });
+
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const response = await fetch("/api/students/import", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ 
+          students: studentsToImport,
+          courseId: selectedCourseId,
+          courseName: courses.find(c => c.id === selectedCourseId)?.title || "Informática"
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao importar alunos");
+      }
+
+      const importResult = await response.json();
+      setSuccessMsg(`${importResult.success} alunos importados com sucesso!`);
+      setImportText("");
+      setImportPreview([]);
+      fetchCounts();
+      fetchUsers(true);
+      setTimeout(() => {
+        setShowImportModal(false);
+        setSuccessMsg("");
+      }, 3000);
+    } catch (err: any) {
+      alert("Erro na importação: " + (err.message || "Erro desconhecido"));
     } finally {
       setLoading(false);
     }
@@ -521,7 +614,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         )}
       </div>
 
-      {/* Stats Cards */}
+      {/* Stats Cards & Controls */}
       <div className="flex flex-col gap-6">
         <div className="glass-card p-5 sm:p-6 flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6 w-full md:w-auto">
@@ -540,6 +633,17 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                 <option key={f.id} value={f.id} className="bg-cockpit-bg">{f.nome}</option>
               ))}
             </select>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4 w-full md:w-auto">
+            {profile.role === "master" && (
+              <button 
+                onClick={() => setShowImportModal(true)}
+                className="flex-1 sm:flex-none bg-neon-blue/20 hover:bg-neon-blue/30 text-neon-blue border border-neon-blue/30 font-bold py-3 px-4 sm:px-6 rounded-xl transition-all text-[10px] sm:text-xs uppercase tracking-widest flex items-center justify-center gap-2"
+              >
+                <Upload className="w-4 h-4" /> Importar <span className="hidden sm:inline">Alunos (CSV)</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -950,8 +1054,123 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         </div>
       ) : null}
 
-      {/* Modal de Detalhes da Missão */}
+      {/* Modals (Incluindo Modal de Importação em Lotes por CSV) */}
       <AnimatePresence>
+        {showImportModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="glass-card w-full max-w-2xl p-8 space-y-6 relative"
+            >
+              <button onClick={() => setShowImportModal(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors">
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+              
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black tracking-tighter flex items-center gap-3">
+                  <Upload className="text-mult-orange w-6 h-6" /> IMPORTAR <span className="text-neon-blue">ALUNOS (CSV)</span>
+                </h2>
+                <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">
+                  Cole os dados abaixo no formato CSV com cabeçalho para processamento em lotes por turma.
+                </p>
+              </div>
+
+              <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2">
+                <p className="text-[10px] font-black text-mult-orange uppercase tracking-widest flex items-center gap-2">
+                  <AlertCircle className="w-3 h-3" /> Formato Recomendado (Ponto e Vírgula):
+                </p>
+                <code className="text-[10px] text-gray-400 block bg-black/40 p-2 rounded font-mono">
+                  Nome Completo;Código;Unidade;Senha Temporária;Turma<br/>
+                  João Silva;12345;rio-verde;senha123;024inf<br/>
+                  Maria Souza;67890;rio-verde;senha456;024inf
+                </code>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                    <Target className="w-3 h-3" /> Selecionar Curso Vinculado:
+                  </label>
+                  <select 
+                    value={selectedCourseId}
+                    onChange={(e) => setSelectedCourseId(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm focus:outline-none focus:border-neon-blue transition-all"
+                  >
+                    {courses.map(course => (
+                      <option key={course.id} value={course.id} className="bg-cockpit-bg">
+                        {course.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <textarea 
+                  value={importText}
+                  onChange={e => { setImportText(e.target.value); setImportPreview([]); }}
+                  placeholder="Cole aqui o conteúdo do seu CSV..."
+                  className="w-full h-40 bg-white/5 border border-white/10 rounded-xl p-4 text-sm font-mono focus:outline-none focus:border-neon-blue transition-all"
+                />
+                
+                <button 
+                  onClick={handlePreviewImport}
+                  className="w-full py-2 bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase tracking-widest rounded-lg border border-white/10 transition-all"
+                >
+                  PRÉ-VISUALIZAR DADOS
+                </button>
+              </div>
+
+              {importPreview.length > 0 && (
+                <div className="max-h-40 overflow-y-auto border border-white/10 rounded-xl bg-black/20">
+                  <table className="w-full text-[10px] text-left">
+                    <thead className="bg-white/5 sticky top-0">
+                      <tr>
+                        <th className="p-2 border-b border-white/10">Nome</th>
+                        <th className="p-2 border-b border-white/10">Código</th>
+                        <th className="p-2 border-b border-white/10">Unidade</th>
+                        <th className="p-2 border-b border-white/10">Turma</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importPreview.slice(0, 10).map((row, idx) => (
+                        <tr key={idx} className="border-b border-white/5">
+                          <td className="p-2">{row["Nome Completo"] || row["nome"]}</td>
+                          <td className="p-2">{row["Código"] || row["codigo"] || row["Matrícula"] || row["matricula"]}</td>
+                          <td className="p-2">{row["Unidade"] || row["unidade"]}</td>
+                          <td className="p-2">{row["Turma"] || row["turma"]}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {successMsg && (
+                <div className="p-3 bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-bold rounded-lg flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4" /> {successMsg}
+                </div>
+              )}
+
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setShowImportModal(false)}
+                  className="flex-1 bg-white/5 hover:bg-white/10 text-white font-bold py-4 rounded-xl transition-all uppercase tracking-widest text-xs"
+                >
+                  CANCELAR
+                </button>
+                <button 
+                  disabled={loading || !importText.trim()}
+                  onClick={handleImportStudents}
+                  className="flex-1 bg-neon-blue text-black font-black py-4 rounded-xl transition-all neon-glow-blue disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
+                >
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "INICIAR IMPORTAÇÃO"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {selectedMissionForView && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <motion.div 
