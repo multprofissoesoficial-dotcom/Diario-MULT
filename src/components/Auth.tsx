@@ -8,14 +8,13 @@ import AtsDashboard from "./AtsDashboard";
 import { auth as firebaseAuth } from "../firebase";
 import { 
   signInWithEmailAndPassword, 
-  onAuthStateChanged,
-  signOut 
+  onAuthStateChanged 
 } from "firebase/auth";
 import { supabase } from "../lib/supabase";
 import { motion, AnimatePresence } from "motion/react";
 import { Rocket, Mail, Lock, Loader2, AlertCircle, ShieldCheck } from "lucide-react";
 
-export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
+export default function Auth() {
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
