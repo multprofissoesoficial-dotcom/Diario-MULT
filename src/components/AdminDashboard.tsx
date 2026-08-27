@@ -161,42 +161,48 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [diagnoseName, setDiagnoseName] = useState("");
   const [showRelinkConfirm, setShowRelinkConfirm] = useState(false);
 
+  // Função de Backup 100% Client-Side via Firestore SDK
   const handleDownloadBackup = async () => {
     setBackupLoading(true);
     try {
-      const token = await auth.currentUser?.getIdToken();
-      const res = await fetch("/api/maintenance/backup", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}` 
+      const colecoes = [
+        "users",
+        "missions",
+        "job_postings",
+        "companies",
+        "applications",
+        "franquias",
+        "courses"
+      ];
+
+      const backupCompleto: Record<string, any[]> = {};
+
+      for (const col of colecoes) {
+        try {
+          const snap = await getDocs(collection(db, col));
+          backupCompleto[col] = snap.docs.map((d) => ({
+            _id: d.id,
+            ...d.data(),
+          }));
+        } catch (err: any) {
+          console.warn(`Erro ao extrair coleção ${col}:`, err);
+          backupCompleto[col] = [];
         }
+      }
+
+      const jsonBlob = new Blob([JSON.stringify(backupCompleto, null, 2)], {
+        type: "application/json",
       });
-      
-      const contentType = res.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        throw new Error(`Servidor respondeu com status ${res.status}. Verifique se a rota foi compilada.`);
-      }
-
-      const responseData = await res.json();
-      if (!res.ok || !responseData.success) {
-        throw new Error(responseData.error || "Falha ao gerar dados de backup");
-      }
-
-      const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(
-        JSON.stringify(responseData.data, null, 2)
-      )}`;
+      const url = URL.createObjectURL(jsonBlob);
       const downloadAnchor = document.createElement("a");
-      downloadAnchor.setAttribute("href", jsonString);
-      downloadAnchor.setAttribute(
-        "download",
-        `backup_mult_${new Date().toISOString().split("T")[0]}.json`
-      );
+      downloadAnchor.href = url;
+      downloadAnchor.download = `backup_mult_${new Date().toISOString().split("T")[0]}.json`;
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
-      downloadAnchor.remove();
+      document.body.removeChild(downloadAnchor);
+      URL.revokeObjectURL(url);
 
-      setSuccessMsg("Backup JSON exportado com sucesso!");
+      setSuccessMsg("Backup JSON baixado com sucesso!");
       setTimeout(() => setSuccessMsg(""), 4000);
     } catch (err: any) {
       console.error("Erro no backup:", err);
@@ -2555,7 +2561,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
+              animate={{ opacity: 1, scale: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
               className="glass-card max-w-md w-full p-8 border-red-500/50"
             >
@@ -2601,8 +2607,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="glass-card max-w-md w-full p-8 border-mult-orange/50"
             >
               <div className="flex flex-col items-center text-center space-y-6">
