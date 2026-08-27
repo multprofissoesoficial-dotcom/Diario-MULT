@@ -2,12 +2,6 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { adminAuth } from "@/lib/firebase-admin";
 
-// Inicializa o cliente Supabase com Service Role para operações administrativas
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
-);
-
 export async function POST(request: Request) {
   try {
     const authHeader = request.headers.get("Authorization");
@@ -24,6 +18,15 @@ export async function POST(request: Request) {
     } catch (error) {
       console.warn("Aviso de verificação de token Admin:", error);
     }
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      return NextResponse.json({ error: "Configuração do Supabase ausente no servidor." }, { status: 500 });
+    }
+
+    const supabaseAdmin = createClient(supabaseUrl, supabaseKey);
 
     const { students, courseId, courseName } = await request.json();
 
@@ -52,7 +55,6 @@ export async function POST(request: Request) {
         const studentId = `${cleanFranquia}_${cleanCodigo}`.toLowerCase().replace(/\s+/g, "");
         const tempPassword = senha ? String(senha).trim() : cleanCodigo || "nome123";
 
-        // Garante a existência do usuário no Firebase Auth se o Admin estiver configurado
         let firebaseUid = studentId;
         if (adminAuth) {
           try {
@@ -71,7 +73,6 @@ export async function POST(request: Request) {
           }
         }
 
-        // Upsert na tabela 'usuarios' do Supabase
         const { error: userError } = await supabaseAdmin
           .from("usuarios")
           .upsert({
@@ -95,7 +96,6 @@ export async function POST(request: Request) {
           continue;
         }
 
-        // Upsert na tabela 'matriculas' do Supabase
         const { error: matriculaError } = await supabaseAdmin
           .from("matriculas")
           .upsert({
