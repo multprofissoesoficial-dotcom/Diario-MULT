@@ -73,6 +73,10 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
   const [newBadge, setNewBadge] = useState<Badge | null>(null);
   const [selectedMission, setSelectedMission] = useState<Mission | null>(null);
 
+  // Real-time status for XP and Badges instead of cached profile data
+  const [currentXP, setCurrentXP] = useState(profile.xp || 0);
+  const [unlockedBadges, setUnlockedBadges] = useState<string[]>(profile.unlockedBadges || []);
+
   // ATS State
   const [selectedSkills, setSelectedSkills] = useState<SkillTag[]>(profile.skills || []);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
@@ -80,6 +84,24 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
   const [jobs, setJobs] = useState<JobPosting[]>([]);
   const [userApplications, setUserApplications] = useState<Application[]>([]);
   const [applyingJobId, setApplyingJobId] = useState<string | null>(null);
+
+  // Fetch true XP and badges on mount
+  useEffect(() => {
+    const fetchFreshProfileData = async () => {
+      if (!profile.id) return;
+      const { data, error } = await supabase
+        .from("usuarios")
+        .select("xp, unlocked_badges")
+        .eq("id", profile.id)
+        .single();
+
+      if (data && !error) {
+        setCurrentXP(data.xp || 0);
+        setUnlockedBadges(data.unlocked_badges || []);
+      }
+    };
+    fetchFreshProfileData();
+  }, [profile.id]);
 
   // 1. Carregar Dados Ativos do Curso no Supabase
   useEffect(() => {
@@ -184,7 +206,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
           courseId: profile.currentCourseId || "INF",
           courseName: "Informática Profissional",
           currentLesson: 1,
-          unlockedBadges: profile.unlockedBadges || []
+          unlockedBadges: unlockedBadges || []
         };
         setEnrollments([defaultEnrollment]);
         setActiveEnrollment(defaultEnrollment);
@@ -192,7 +214,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     };
 
     fetchEnrollments();
-  }, [profile.id, profile.currentCourseId]);
+  }, [profile.id, profile.currentCourseId, unlockedBadges]);
 
   // 4. Carregar Missões do Aluno via Supabase
   useEffect(() => {
@@ -239,17 +261,19 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
 
     const badgesToUse = activeCourse?.badges || BADGES;
     const newBadges = badgesToUse.filter(badge => 
-      maxClass >= (badge.unlockClass || 0) && !profile.unlockedBadges.includes(badge.id)
+      maxClass >= (badge.unlockClass || 0) && !unlockedBadges.includes(badge.id)
     );
 
     if (newBadges.length > 0) {
       const newBadgeIds = newBadges.map(b => b.id);
-      const updatedBadges = Array.from(new Set([...(profile.unlockedBadges || []), ...newBadgeIds]));
+      const updatedBadges = Array.from(new Set([...unlockedBadges, ...newBadgeIds]));
 
       await supabase
         .from("usuarios")
         .update({ unlocked_badges: updatedBadges })
         .eq("id", profile.id);
+
+      setUnlockedBadges(updatedBadges); // Update locally
 
       const courseId = activeEnrollment?.courseId || "INF";
       await supabase
@@ -454,10 +478,11 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
     }
   };
 
-  const currentRank = RANKS.reduce((prev, curr) => (profile.xp >= curr.minXP ? curr : prev), RANKS[0]);
-  const nextRank = RANKS.find(r => r.minXP > profile.xp) || null;
+  // Rank progress based on real-time currentXP
+  const currentRank = RANKS.reduce((prev, curr) => (currentXP >= curr.minXP ? curr : prev), RANKS[0]);
+  const nextRank = RANKS.find(r => r.minXP > currentXP) || null;
   const progress = nextRank 
-    ? ((profile.xp - currentRank.minXP) / (nextRank.minXP - currentRank.minXP)) * 100 
+    ? ((currentXP - currentRank.minXP) / (nextRank.minXP - currentRank.minXP)) * 100 
     : 100;
 
   return (
@@ -588,7 +613,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
 
             <div className="space-y-2">
               <div className="flex justify-between text-xs font-bold uppercase tracking-widest text-gray-400">
-                <span>XP: <XPCounter value={profile.xp} /></span>
+                <span>XP: <XPCounter value={currentXP} /></span>
                 {nextRank && <span>Próximo: {nextRank.minXP} XP</span>}
               </div>
               <div className="h-3 bg-white/5 rounded-full overflow-hidden border border-white/10">
@@ -614,7 +639,7 @@ export default function StudentDashboard({ profile }: { profile: UserProfile }) 
             <div className="grid grid-cols-4 sm:grid-cols-5 gap-3 sm:gap-4">
               {(activeCourse?.badges || BADGES).map((badge) => {
                 const Icon = iconMap[badge.icon] || Trophy;
-                const isUnlocked = activeEnrollment?.unlockedBadges?.includes(badge.id);
+                const isUnlocked = unlockedBadges?.includes(badge.id);
                 return (
                   <div 
                     key={badge.id}
