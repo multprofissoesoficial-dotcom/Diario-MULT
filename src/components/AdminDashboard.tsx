@@ -138,7 +138,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
       const { data } = await query;
       if (data) {
-        const unique = Array.from(new Set(data.map(d => d.turma).filter(Boolean))));
+        const unique = Array.from(new Set(data.map(d => d.turma).filter(Boolean)));
         setTurmas(unique as string[]);
       }
     };
