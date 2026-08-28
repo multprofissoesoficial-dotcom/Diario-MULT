@@ -104,7 +104,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
   const [selectedMissionForView, setSelectedMissionForView] = useState<Mission | null>(null);
   
-  // Form states
+  // Form states para Cadastro Individual
   const [newUser, setNewUser] = useState({
     nome: "",
     email: "",
@@ -388,7 +388,63 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
-  // Funcionalidade de Importação em Lotes por CSV (Restaurada)
+  // 7. Cadastro Individual de Usuário (Integrado à API/Supabase)
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUser.nome || !newUser.senha) {
+      alert("Nome e Senha são obrigatórios.");
+      return;
+    }
+    if (newUser.role !== "master" && !newUser.franquiaId) {
+      alert("Selecione uma unidade para este usuário.");
+      return;
+    }
+
+    setLoading(true);
+    setSuccessMsg("");
+
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      // Reutiliza a rota de importação ou endpoint equivalente adaptado para usuário único
+      const response = await fetch("/api/users/create", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(newUser),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao criar usuário");
+      }
+
+      setSuccessMsg("Usuário cadastrado com sucesso!");
+      setNewUser({ 
+        nome: "", 
+        email: "", 
+        codigo: "", 
+        senha: "", 
+        role: "aluno", 
+        franquiaId: profile.franquiaId || "",
+        turma: ""
+      });
+      fetchCounts();
+      fetchUsers(true);
+      setTimeout(() => {
+        setShowAddUser(false);
+        setSuccessMsg("");
+      }, 2000);
+    } catch (err: any) {
+      console.error("Erro ao criar usuário:", err);
+      alert("Erro ao criar usuário: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Funcionalidade de Importação em Lotes por CSV
   const handlePreviewImport = () => {
     if (!importText.trim()) return;
     const results = Papa.parse(importText, { 
@@ -636,6 +692,12 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 sm:gap-4 w-full md:w-auto">
+            <button 
+              onClick={() => setShowAddUser(true)}
+              className="flex-1 sm:flex-none bg-mult-orange hover:bg-mult-orange/90 text-white font-bold py-3 px-4 sm:px-6 rounded-xl transition-all text-[10px] sm:text-xs uppercase tracking-widest flex items-center justify-center gap-2 neon-glow-orange"
+            >
+              <UserPlus className="w-4 h-4" /> Novo Usuário
+            </button>
             {profile.role === "master" && (
               <button 
                 onClick={() => setShowImportModal(true)}
@@ -1054,8 +1116,130 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         </div>
       ) : null}
 
-      {/* Modals (Incluindo Modal de Importação em Lotes por CSV) */}
+      {/* Modals: Novo Usuário e Importação CSV */}
       <AnimatePresence>
+        {showAddUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="glass-card w-full max-w-lg p-8 space-y-6 relative"
+            >
+              <button onClick={() => setShowAddUser(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors">
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+              
+              <h2 className="text-2xl font-black tracking-tighter flex items-center gap-3">
+                <UserPlus className="text-mult-orange w-6 h-6" /> CADASTRAR <span className="text-neon-blue">USUÁRIO</span>
+              </h2>
+
+              <form onSubmit={handleCreateUser} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Nome Completo</label>
+                  <input 
+                    required
+                    value={newUser.nome}
+                    onChange={e => setNewUser({...newUser, nome: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                    placeholder="Nome do usuário"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">E-mail</label>
+                    <input 
+                      type="email"
+                      value={newUser.email}
+                      onChange={e => setNewUser({...newUser, email: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                      placeholder="seu@email.com"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Matrícula / Código</label>
+                    <input 
+                      value={newUser.codigo}
+                      onChange={e => setNewUser({...newUser, codigo: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                      placeholder="Ex: 12345"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Senha Temporária</label>
+                    <input 
+                      required
+                      type="password"
+                      value={newUser.senha}
+                      onChange={e => setNewUser({...newUser, senha: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                      placeholder="Mínimo 6 caracteres"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Cargo (Role)</label>
+                    <select 
+                      value={newUser.role}
+                      onChange={e => setNewUser({...newUser, role: e.target.value as any})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                    >
+                      {profile.role === "master" && <option value="master" className="bg-cockpit-bg">Master</option>}
+                      <option value="coordenador" className="bg-cockpit-bg">Coordenador</option>
+                      <option value="professor" className="bg-cockpit-bg">Professor</option>
+                      <option value="rh" className="bg-cockpit-bg">Estagiária de RH</option>
+                      <option value="aluno" className="bg-cockpit-bg">Aluno</option>
+                    </select>
+                  </div>
+                </div>
+
+                {newUser.role === "aluno" && (
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Turma (ex: 024inf)</label>
+                    <input 
+                      value={newUser.turma}
+                      onChange={e => setNewUser({...newUser, turma: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                      placeholder="Código da turma"
+                    />
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Franquia / Unidade</label>
+                  <select 
+                    disabled={profile.role !== "master"}
+                    value={newUser.franquiaId}
+                    onChange={e => setNewUser({...newUser, franquiaId: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                  >
+                    <option value="" className="bg-cockpit-bg">Selecione uma unidade</option>
+                    {franquias.map(f => (
+                      <option key={f.id} value={f.id} className="bg-cockpit-bg">{f.nome}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {successMsg && (
+                  <div className="p-3 bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-bold rounded-lg flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4" /> {successMsg}
+                  </div>
+                )}
+
+                <button 
+                  disabled={loading}
+                  className="w-full bg-neon-blue text-black font-black py-4 rounded-xl transition-all neon-glow-blue disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
+                >
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "CRIAR USUÁRIO"}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
         {showImportModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <motion.div 
@@ -1165,90 +1349,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                   className="flex-1 bg-neon-blue text-black font-black py-4 rounded-xl transition-all neon-glow-blue disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
                 >
                   {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "INICIAR IMPORTAÇÃO"}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-
-        {selectedMissionForView && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="glass-card w-full max-w-2xl p-8 space-y-6 relative border-neon-blue/30"
-            >
-              <button 
-                onClick={() => setSelectedMissionForView(null)} 
-                className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
-              >
-                <Plus className="w-6 h-6 rotate-45" />
-              </button>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-black tracking-tighter flex items-center gap-3">
-                    <Eye className="text-neon-blue w-6 h-6" /> DETALHES DA <span className="text-mult-orange">MISSÃO</span>
-                  </h2>
-                  <span className={cn(
-                    "text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border",
-                    selectedMissionForView.status === "approved" ? "bg-green-500/10 text-green-400 border-green-500/20" :
-                    selectedMissionForView.status === "pending" ? "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" :
-                    selectedMissionForView.status === "bonus" ? "bg-purple-500/10 text-purple-400 border-purple-500/20" :
-                    "bg-red-500/10 text-red-400 border-red-500/20"
-                  )}>
-                    {selectedMissionForView.status === "approved" ? "Aprovado" : 
-                     selectedMissionForView.status === "pending" ? "Pendente" : 
-                     selectedMissionForView.status === "bonus" ? "Bônus" : "Rejeitado"}
-                  </span>
-                </div>
-                <div className="flex items-center gap-4 text-[10px] text-gray-500 font-bold uppercase tracking-widest">
-                  <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {selectedMissionForView.studentName}</span>
-                  <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {new Date(selectedMissionForView.createdAt).toLocaleDateString("pt-BR")}</span>
-                  <span className="flex items-center gap-1"><Target className="w-3 h-3" /> {getRelativeLesson(selectedMissionForView.classNum).label}</span>
-                </div>
-              </div>
-
-              <div className="bg-black/40 border border-white/10 rounded-xl p-6 min-h-[200px] max-h-[400px] overflow-y-auto">
-                <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">
-                  {selectedMissionForView.content || "Nenhum conteúdo enviado."}
-                </p>
-              </div>
-
-              <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-4 border-t border-white/5">
-                <div className="flex gap-2 w-full sm:w-auto">
-                  {selectedMissionForView.status === "pending" && (
-                    <>
-                      <button 
-                        onClick={() => handleApproveMission(selectedMissionForView, false)}
-                        disabled={loading}
-                        className="flex-1 sm:flex-none bg-green-500/20 hover:bg-green-500/30 text-green-400 border border-green-500/30 font-bold py-2 px-4 rounded-xl transition-all flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest disabled:opacity-50"
-                      >
-                        <CheckCircle className="w-4 h-4" /> Aprovar
-                      </button>
-                      <button 
-                        onClick={() => handleApproveMission(selectedMissionForView, true)}
-                        disabled={loading}
-                        className="flex-1 sm:flex-none bg-mult-orange/20 hover:bg-mult-orange/30 text-mult-orange border border-mult-orange/30 font-bold py-2 px-4 rounded-xl transition-all flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest disabled:opacity-50 neon-glow-orange"
-                      >
-                        <Zap className="w-4 h-4" /> Bônus
-                      </button>
-                      <button 
-                        onClick={() => handleRejectMission(selectedMissionForView)}
-                        disabled={loading}
-                        className="flex-1 sm:flex-none bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 font-bold py-2 px-4 rounded-xl transition-all flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest disabled:opacity-50"
-                      >
-                        <XCircle className="w-4 h-4" /> Rejeitar
-                      </button>
-                    </>
-                  )}
-                </div>
-                <button 
-                  onClick={() => setSelectedMissionForView(null)}
-                  className="w-full sm:w-auto px-8 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white font-black uppercase tracking-widest text-[10px] border border-white/10 transition-all"
-                >
-                  FECHAR
                 </button>
               </div>
             </motion.div>
