@@ -97,7 +97,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [importingToSupabase, setImportingToSupabase] = useState(false);
   const [supabaseImportReport, setSupabaseImportReport] = useState<any>(null);
 
-  // States do Módulo Raio-X de Investigação
   const [xraySearch, setXraySearch] = useState("");
   const [xrayResults, setXrayResults] = useState<any>(null);
   const [xrayLoading, setXrayLoading] = useState(false);
@@ -581,7 +580,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         const { data: uData, error: uErr } = await supabase
           .from("usuarios")
           .select("id, uid, codigo, franquia_id")
-          .order('created_at')
+          .order('id') // Força ordem estrita de paginação
           .range(uPage * 1000, (uPage + 1) * 1000 - 1);
         
         if (uErr) throw uErr;
@@ -617,7 +616,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           .from("missoes")
           .select("student_id, status, xp_awarded")
           .in("status", ["approved", "bonus"])
-          .order('created_at') 
+          .order('id') // Ordem estrita para não pular missões
           .range(mPage * 1000, (mPage + 1) * 1000 - 1);
 
         if (mErr) throw mErr;
@@ -632,9 +631,13 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
       const xpMap: Record<string, number> = {};
       allMissionsFromDB.forEach(m => {
-        const xp = (m.xp_awarded !== null && m.xp_awarded !== undefined) 
-           ? Number(m.xp_awarded) 
-           : (m.status === 'bonus' ? XP_BONUS : XP_PER_MISSION);
+        // 🔥 A MÁGICA DA CORREÇÃO AQUI 🔥
+        // Ignoramos completamente se a missão está com "0" salvo no banco (o erro legado).
+        // Se o status é aprovado ou bônus, forçamos o valor real da regra de negócio.
+        let xp = Number(m.xp_awarded);
+        if (!xp || xp === 0) {
+           xp = (m.status === 'bonus') ? XP_BONUS : XP_PER_MISSION; // 100 ou 50 XP
+        }
            
         const sId = String(m.student_id).trim();
         const canonicalId = userMap[sId] || sId; 
@@ -658,7 +661,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         );
       }
 
-      alert(`Sincronização global concluída! Saldo de XP de ${successCount} alunos foram recalculados e corrigidos com sucesso.`);
+      alert(`Sincronização global concluída com sucesso! O Saldo de XP de ${successCount} alunos foi recalculado e corrigido.`);
       
       fetchCounts();
       fetchUsers(true); 
