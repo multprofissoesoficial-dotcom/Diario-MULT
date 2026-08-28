@@ -23,7 +23,6 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
   const [authError, setAuthError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // 1. Monitorar Sessão e Buscar no Supabase Diretamente
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
       if (!firebaseUser) {
@@ -37,26 +36,15 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
       
       try {
         const userEmail = (firebaseUser.email || "").toLowerCase().trim();
-        let foundData = null;
-
-        // Busca por e-mail insensível a maiúsculas/minúsculas diretamente no Supabase
+        
+        // Consulta direta e única na tabela 'usuarios' do Supabase (sem Firestore)
         const { data: usersList, error: queryError } = await supabase
           .from("usuarios")
           .select("*");
 
+        let foundData = null;
         if (!queryError && usersList) {
           foundData = usersList.find((u: any) => u.email && u.email.toLowerCase().trim() === userEmail);
-        }
-
-        // Se não achou por e-mail, tenta por UID
-        if (!foundData && firebaseUser.uid) {
-          const { data: dataUid } = await supabase
-            .from("usuarios")
-            .select("*")
-            .or(`uid.eq.${firebaseUser.uid},id.eq.${firebaseUser.uid}`)
-            .maybeSingle();
-
-          if (dataUid) foundData = dataUid;
         }
 
         if (foundData) {
@@ -90,7 +78,7 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
           setProfile(null);
         }
       } catch (err: any) {
-        console.error("Erro ao buscar perfil:", err);
+        console.error("Erro ao carregar perfil:", err);
         setAuthError("Erro ao carregar dados do perfil.");
         setProfile(null);
       } finally {
@@ -110,7 +98,6 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
       let inputVal = email.trim();
       let targetEmail = inputVal.toLowerCase();
       
-      // Se digitou apenas números (matrícula do aluno), busca o e-mail real correspondente no Supabase
       if (/^\d+$/.test(inputVal)) {
         const { data: userRecord, error: searchError } = await supabase
           .from("usuarios")
