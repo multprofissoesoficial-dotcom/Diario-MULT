@@ -1,19 +1,11 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { 
-  collection, 
-  query, 
-  where, 
-  orderBy, 
-  getDocs,
-  limit
-} from "firebase/firestore";
-import { db } from "../firebase";
+import { supabase } from "../lib/supabase";
 import { Mission, UserProfile } from "../types";
-import { motion, AnimatePresence } from "motion/react";
+import { motion } from "motion/react";
 import { Clock, FileText, CheckCircle, Zap, X, Calendar, AlertCircle } from "lucide-react";
-import { handleFirestoreError, OperationType, cn } from "../lib/utils";
+import { cn } from "../lib/utils";
 import { getRelativeLesson } from "../utils/lessonMapper";
 
 interface MissionHistoryModalProps {
@@ -38,38 +30,39 @@ export default function MissionHistoryModal({ student, onClose }: MissionHistory
           return;
         }
 
-        const q = query(
-          collection(db, "missions"),
-          where("studentId", "in", queryIds),
-          limit(100)
-        );
-        const snap = await getDocs(q);
-        const fetchedMissions = snap.docs.map(d => ({ id: d.id, ...d.data() } as Mission));
-        
-        // Sort client-side to avoid index requirement
-        fetchedMissions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        
-        setMissions(fetchedMissions);
+        // Busca direto no Supabase (Mude 'missoes' para 'missions' se sua tabela estiver em inglês)
+        const { data, error: fetchError } = await supabase
+          .from("missoes") 
+          .select("*")
+          .in("student_id", queryIds)
+          .order("created_at", { ascending: false })
+          .limit(100);
+
+        if (fetchError) throw fetchError;
+
+        if (data) {
+          const fetchedMissions = data.map((d: any) => ({
+            id: d.id,
+            studentId: d.student_id || d.studentId,
+            classNum: d.class_num || d.classNum,
+            content: d.content,
+            status: d.status,
+            createdAt: d.created_at || d.createdAt,
+            xpAwarded: d.xp_awarded || d.xpAwarded,
+          } as Mission));
+          
+          setMissions(fetchedMissions);
+        }
       } catch (err: any) {
         console.error("Error fetching missions:", err);
-        try {
-          handleFirestoreError(err, OperationType.GET, "missions");
-        } catch (e: any) {
-          // If it's a JSON error from handleFirestoreError, try to parse it
-          try {
-            const errData = JSON.parse(e.message);
-            setError(`Erro ao carregar: ${errData.error || "Permissão negada"}`);
-          } catch {
-            setError("Erro de permissão ao acessar histórico.");
-          }
-        }
+        setError("Erro ao carregar o histórico. Tente novamente.");
       } finally {
         setLoading(false);
       }
     };
 
     fetchMissions();
-  }, [student.uid]);
+  }, [student.id, student.uid]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
