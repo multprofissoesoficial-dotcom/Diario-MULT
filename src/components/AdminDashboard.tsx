@@ -559,7 +559,44 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       e.target.value = "";
     }
   };
+const handleGlobalXPSync = async () => {
+    if (!confirm("ATENÇÃO: Isso irá recalcular o saldo de XP de TODOS os alunos com base no histórico de missões aprovadas e bônus. Deseja continuar?")) return;
+    
+    setLoading(true);
+    try {
+      const { data: missoes, error: errMissions } = await supabase
+        .from("missoes")
+        .select("student_id, status, xp_awarded")
+        .in("status", ["approved", "bonus"]);
 
+      if (errMissions) throw errMissions;
+
+      const xpMap: Record<string, number> = {};
+      if (missoes) {
+        missoes.forEach(m => {
+          const xp = m.xp_awarded ? Number(m.xp_awarded) : (m.status === 'bonus' ? XP_BONUS : XP_PER_MISSION);
+          const sId = m.student_id;
+          if (!xpMap[sId]) xpMap[sId] = 0;
+          xpMap[sId] += xp;
+        });
+      }
+
+      // Prepara as promessas de atualização para todos os alunos que têm XP
+      const updates = Object.entries(xpMap).map(([id, totalXp]) =>
+        supabase.from("usuarios").update({ xp: totalXp }).eq("id", id)
+      );
+
+      await Promise.all(updates);
+
+      alert(`Sincronização global concluída! Saldo de XP de ${updates.length} alunos foram recalculados e corrigidos.`);
+      fetchUsers(true); 
+    } catch (err: any) {
+      console.error("Erro ao sincronizar XP:", err);
+      alert("Erro ao recalcular XP: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
   const totalAlunos = counts.users.aluno;
   const avgXP = totalAlunos > 0 ? Math.round(users.filter(u => u.role === "aluno").reduce((acc, curr) => acc + (curr.xp || 0), 0) / (users.filter(u => u.role === "aluno").length || 1)) : 0;
 
