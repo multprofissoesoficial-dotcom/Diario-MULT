@@ -23,7 +23,7 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
   const [authError, setAuthError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // 1. Monitorar Sessão do Firebase Auth e Buscar Perfil no Supabase em Cascata Segura
+  // 1. Monitorar Sessão e Sincronizar Perfil com Auto-Cura de UID
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
       setUser(firebaseUser);
@@ -31,7 +31,7 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
         try {
           let foundData = null;
 
-          // Passo A: Tenta buscar pelo UID exato do Firebase
+          // Tentativa A: Buscar por UID exato
           if (firebaseUser.uid) {
             const { data: dataUid } = await supabase
               .from("usuarios")
@@ -42,7 +42,7 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
             if (dataUid) foundData = dataUid;
           }
 
-          // Passo B: Se não achou, tenta buscar pelo ID exato igual ao UID
+          // Tentativa B: Buscar por ID igual ao UID
           if (!foundData && firebaseUser.uid) {
             const { data: dataId } = await supabase
               .from("usuarios")
@@ -53,7 +53,7 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
             if (dataId) foundData = dataId;
           }
 
-          // Passo C: Se ainda não achou, busca pelo e-mail exato normalizado
+          // Tentativa C: Buscar por E-mail (Auto-cura de UID caso tenha sido recriado no Firebase)
           if (!foundData && firebaseUser.email) {
             const { data: dataEmail } = await supabase
               .from("usuarios")
@@ -61,13 +61,20 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
               .ilike("email", firebaseUser.email.trim())
               .maybeSingle();
 
-            if (dataEmail) foundData = dataEmail;
+            if (dataEmail) {
+              foundData = dataEmail;
+              // Atualiza automaticamente o UID no Supabase para casar com o Firebase atual
+              await supabase
+                .from("usuarios")
+                .update({ uid: firebaseUser.uid })
+                .eq("id", dataEmail.id);
+            }
           }
 
           if (foundData) {
             const mappedProfile: UserProfile = {
               id: foundData.id,
-              uid: foundData.uid || foundData.id,
+              uid: foundData.uid || firebaseUser.uid,
               email: foundData.email,
               displayName: foundData.display_name,
               codigo: foundData.codigo,
@@ -115,7 +122,7 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
       let inputVal = email.trim();
       let targetEmail = inputVal.toLowerCase();
       
-      // Se o usuário digitou apenas números (matrícula/código de aluno), busca o e-mail real correspondente no Supabase
+      // Se digitou apenas números (matrícula de aluno), busca o e-mail real correspondente no Supabase
       if (/^\d+$/.test(inputVal)) {
         const { data: userRecord, error: searchError } = await supabase
           .from("usuarios")
