@@ -26,7 +26,6 @@ export default function App() {
         const targetId = profile.id;
         
         try {
-          // Busca matrículas direto do Supabase para evitar erros e cota do Firestore
           const { data, error } = await supabase
             .from("matriculas")
             .select("*")
@@ -36,10 +35,13 @@ export default function App() {
 
           if (!error && data) {
             const list: Enrollment[] = data.map((d: any) => ({
+              id: d.id || `${d.aluno_id}_${d.course_id}`,
               courseId: d.course_id || d.courseId || "INF",
               courseName: d.course_name || d.courseName || "Informática",
               currentLesson: d.current_lesson || 1,
-              status: d.status || "ativo"
+              status: d.status || "ativo",
+              enrolledAt: d.enrolled_at || d.enrolledAt || new Date().toISOString(),
+              unlockedBadges: d.unlocked_badges || d.unlockedBadges || []
             }));
             
             setEnrollments(list);
