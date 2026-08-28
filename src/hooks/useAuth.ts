@@ -26,16 +26,20 @@ export function useAuth() {
         const userEmail = (firebaseUser.email || "").toLowerCase().trim();
         let foundData = null;
 
-        // 1. Busca no Supabase pelo e-mail exato
-        const { data: usersList, error: queryError } = await supabase
-          .from("usuarios")
-          .select("*");
+        // 1. Busca Otimizada: Procura diretamente o e-mail no banco, vencendo o limite de 1000 linhas
+        if (userEmail) {
+          const { data: dataEmail, error: emailError } = await supabase
+            .from("usuarios")
+            .select("*")
+            .ilike("email", userEmail)
+            .maybeSingle();
 
-        if (!queryError && usersList) {
-          foundData = usersList.find((u: any) => u.email && u.email.toLowerCase().trim() === userEmail);
+          if (dataEmail) {
+            foundData = dataEmail;
+          }
         }
 
-        // 2. Se não achou por e-mail, tenta por UID ou ID
+        // 2. Fallback: Tenta por UID do Firebase caso o e-mail não seja encontrado
         if (!foundData && firebaseUser.uid) {
           const { data: dataUid } = await supabase
             .from("usuarios")
