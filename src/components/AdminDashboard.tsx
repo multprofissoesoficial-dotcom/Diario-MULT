@@ -1,1101 +1,1570 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { UserProfile, Mission, Badge, SkillTag, JobPosting, Application, Enrollment, Course } from "../types";
-import { RANKS, BADGES } from "../constants";
-import { getAbsoluteLessonId, getRelativeLesson, getLessonsForModule } from "../utils/lessonMapper";
-import { motion, AnimatePresence } from "motion/react";
-import { 
-  User as UserIcon, 
-  Trophy, 
-  Send, 
-  CheckCircle, 
-  Clock, 
-  Zap, 
-  ChevronRight,
-  Rocket,
-  Globe,
-  Briefcase,
-  Presentation as PresentationIcon,
-  Database,
-  LogOut,
-  FileText
-} from "lucide-react";
-import { fireConfetti } from "../lib/confetti";
-import { cn, sanitizeText } from "../lib/utils";
 import { auth } from "../firebase";
 import { supabase } from "../lib/supabase";
+import { cn } from "../lib/utils";
+import { UserProfile, Franquia, Mission } from "../types";
+import { getRelativeLesson } from "../utils/lessonMapper";
+import MissionHistoryModal from "./MissionHistoryModal";
+import { ROLES_LABELS, RANKS, XP_PER_MISSION, XP_BONUS } from "../constants";
+import { motion, AnimatePresence } from "motion/react";
+import Papa from "papaparse";
+import AtsDashboard from "./AtsDashboard";
+import CourseManager from "./CourseManager";
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer, 
+  Cell 
+} from "recharts";
+import { 
+  Users, 
+  Plus, 
+  Building2, 
+  Search, 
+  Filter, 
+  LogOut, 
+  Trophy, 
+  FileText, 
+  UserPlus, 
+  Loader2, 
+  CheckCircle2, 
+  Rocket, 
+  Upload, 
+  AlertCircle, 
+  Trash2, 
+  Clock, 
+  Eye, 
+  Lock as LockIcon, 
+  Briefcase, 
+  Target, 
+  CheckCircle, 
+  Zap, 
+  XCircle, 
+  Calendar, 
+  BookOpen, 
+  Settings, 
+  Download,
+  RefreshCw
+} from "lucide-react";
 
-const iconMap: Record<string, React.ElementType> = {
-  Rocket,
-  Globe,
-  Briefcase,
-  Presentation: PresentationIcon,
-  Database
-};
-
-function XPCounter({ value }: { value: number }) {
-  const [displayValue, setDisplayValue] = useState(value);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      if (displayValue < value) {
-        setDisplayValue(prev => Math.min(prev + 5, value));
-      } else if (displayValue > value) {
-        setDisplayValue(value);
-      }
-    }, 20);
-    return () => clearTimeout(timeout);
-  }, [value, displayValue]);
-
-  return <span>{displayValue}</span>;
-}
-
-const SKILLS: SkillTag[] = [
-  'Boa Comunicação', 'Trabalho em Equipe', 'Proatividade', 'Organização', 
-  'Perfil Analítico', 'Adaptabilidade', 'Inteligência Emocional', 'Foco em Resultados', 
-  'Informática Básica', 'Pacote Office', 'Atendimento ao Cliente', 'Vendas e Negociação', 
-  'Inglês Básico', 'Rotinas Administrativas', 'Primeiro Emprego', 
-  'Disponibilidade Tarde/Noite', 'Disponibilidade Manhã/Tarde'
-];
-
-export default function StudentDashboard({ profile }: { profile: UserProfile }) {
-  const [activeTab, setActiveTab] = useState<"missions" | "ats">("missions");
-  const [module, setModule] = useState("Windows");
-  const [classNum, setClassNum] = useState(1);
-  const [content, setContent] = useState("");
-  const [missions, setMissions] = useState<Mission[]>([]);
-  const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
-  const [activeEnrollment, setActiveEnrollment] = useState<Enrollment | null>(null);
-  const [activeCourse, setActiveCourse] = useState<Course | null>(null);
+export default function AdminDashboard({ profile }: { profile: UserProfile }) {
+  const [franquias, setFranquias] = useState<Franquia[]>([]);
+  const [selectedFranquia, setSelectedFranquia] = useState<string>(profile.franquiaId || "all");
+  const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(false);
-  const [aiFeedback, setAiFeedback] = useState<string | null>(null);
-  const [newBadge, setNewBadge] = useState<Badge | null>(null);
-  const [selectedMission, setSelectedMission] = useState<Mission | null>(null);
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
+  const [importPreview, setImportPreview] = useState<any[]>([]);
+  const [showEditUser, setShowEditUser] = useState<UserProfile | null>(null);
+  const [showResetPasswordModal, setShowResetPasswordModal] = useState<UserProfile | null>(null);
+  const [newPasswordForReset, setNewPasswordForReset] = useState("");
+  const [showMissionHistory, setShowMissionHistory] = useState<UserProfile | null>(null);
+  const [showAddFranquia, setShowAddFranquia] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(0);
+  const [usersPerPage] = useState(50);
+  const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [turmaFilter, setTurmaFilter] = useState<string>("all");
+  const [hasMore, setHasMore] = useState(true);
+  const [pendingOnly, setPendingOnly] = useState(false);
+  const [pendingMissions, setPendingMissions] = useState<Mission[]>([]);
+  const [courses, setCourses] = useState<any[]>([]);
+  const [selectedCourseId, setSelectedCourseId] = useState<string>("INF");
+  const [activeTab, setActiveTab] = useState<"users" | "activities" | "ats" | "courses" | "maintenance">(
+    profile.role === "rh" ? "ats" : "users"
+  );
+  
+  const [allMissions, setAllMissions] = useState<Mission[]>([]);
+  const [missionsPage, setMissionsPage] = useState(0);
+  const [hasMoreMissions, setHasMoreMissions] = useState(true);
+  const [dateFilter, setDateFilter] = useState({ start: "", end: "" });
+  const [activitySearch, setActivitySearch] = useState("");
+  const [activityStatusFilter, setActivityStatusFilter] = useState<string>("all");
+  const [resolvedUsers, setResolvedUsers] = useState<Record<string, UserProfile>>({});
 
-  const [currentXP, setCurrentXP] = useState(profile.xp || 0);
-  const [unlockedBadges, setUnlockedBadges] = useState<string[]>(profile.unlockedBadges || []);
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [importingToSupabase, setImportingToSupabase] = useState(false);
+  const [supabaseImportReport, setSupabaseImportReport] = useState<any>(null);
 
-  const [selectedSkills, setSelectedSkills] = useState<SkillTag[]>(profile.skills || []);
-  const [resumeFile, setResumeFile] = useState<File | null>(null);
-  const [uploadingProfile, setUploadingProfile] = useState(false);
-  const [jobs, setJobs] = useState<JobPosting[]>([]);
-  const [userApplications, setUserApplications] = useState<Application[]>([]);
-  const [applyingJobId, setApplyingJobId] = useState<string | null>(null);
+  const [counts, setCounts] = useState({
+    users: { total: 0, aluno: 0, professor: 0, coordenador: 0, rh: 0, pending: 0, active: 0 },
+    missions: { total: 0, pending: 0, approved: 0, bonus: 0 },
+    ats: { jobs: 0, applications: 0, companies: 0, hired: 0 }
+  });
+
+  const [selectedMissionForView, setSelectedMissionForView] = useState<Mission | null>(null);
+  
+  const [newUser, setNewUser] = useState({
+    nome: "",
+    email: "",
+    codigo: "",
+    senha: "",
+    role: "aluno" as any,
+    franquiaId: profile.franquiaId || "",
+    turma: ""
+  });
+  const [newFranquia, setNewFranquia] = useState({ id: "", nome: "", cidade: "" });
+  const [successMsg, setSuccessMsg] = useState("");
+  const [turmas, setTurmas] = useState<string[]>([]);
 
   useEffect(() => {
-    const fetchFreshProfileData = async () => {
-      if (!profile.id) return;
-      const { data, error } = await supabase
-        .from("usuarios")
-        .select("xp, unlocked_badges")
-        .eq("id", profile.id)
-        .single();
+    const fetchBaseData = async () => {
+      const { data: frs } = await supabase.from("franquias").select("*").order("nome");
+      if (frs) setFranquias(frs);
 
-      if (data && !error) {
-        setCurrentXP(data.xp || 0);
-        setUnlockedBadges(data.unlocked_badges || []);
+      const { data: crs } = await supabase.from("cursos").select("*").order("title");
+      if (crs) setCourses(crs);
+    };
+    fetchBaseData();
+  }, []);
+
+  useEffect(() => {
+    const fetchTurmas = async () => {
+      let query = supabase.from("usuarios").select("turma").not("turma", "is", null);
+      if (profile.role !== "master") {
+        query = query.eq("franquia_id", profile.franquiaId);
+      } else if (selectedFranquia !== "all") {
+        query = query.eq("franquia_id", selectedFranquia);
+      }
+
+      const { data } = await query;
+      if (data) {
+        const unique = Array.from(new Set(data.map(d => d.turma).filter(Boolean))));
+        setTurmas(unique as string[]);
       }
     };
-    fetchFreshProfileData();
-  }, [profile.id]);
+    fetchTurmas();
+  }, [selectedFranquia, profile.franquiaId, profile.role]);
 
   useEffect(() => {
-    const fetchCourse = async () => {
-      if (profile.currentCourseId) {
-        const { data, error } = await supabase
-          .from("cursos")
-          .select("*")
-          .eq("id", profile.currentCourseId)
-          .single();
+    fetchCounts();
+  }, [selectedFranquia, profile.franquiaId, profile.role]);
 
-        if (data && !error) {
-          setActiveCourse({
-            id: data.id,
-            title: data.title,
-            badges: data.badges || []
-          } as any);
+  const fetchCounts = async () => {
+    try {
+      const getCount = async (table: string, applyFilter?: (q: any) => any) => {
+        let q = supabase.from(table).select("*", { count: "exact", head: true });
+        if (profile.role !== "master") {
+          q = q.eq("franquia_id", profile.franquiaId);
+        } else if (selectedFranquia !== "all") {
+          q = q.eq("franquia_id", selectedFranquia);
         }
-      }
-    };
-    fetchCourse();
-  }, [profile.currentCourseId]);
+        if (applyFilter) q = applyFilter(q);
+        const { count } = await q;
+        return count || 0;
+      };
 
-  useEffect(() => {
-    const fetchAtsData = async () => {
-      if (!profile.id) return;
+      const [
+        totalUsers, alunoCount, profCount, coordCount, rhCount, activeCount,
+        totalMis, pendMis, appMis, bonMis,
+        jobCount, appCount, compCount, hiredCount
+      ] = await Promise.all([
+        getCount("usuarios"),
+        getCount("usuarios", q => q.eq("role", "aluno")),
+        getCount("usuarios", q => q.eq("role", "professor")),
+        getCount("usuarios", q => q.eq("role", "coordenador")),
+        getCount("usuarios", q => q.eq("role", "rh")),
+        getCount("usuarios", q => q.eq("role", "aluno").not("last_login", "is", null)),
+        getCount("missoes"),
+        getCount("missoes", q => q.eq("status", "pending")),
+        getCount("missoes", q => q.eq("status", "approved")),
+        getCount("missoes", q => q.eq("status", "bonus")),
+        getCount("vagas", q => q.eq("status", "aberta")),
+        getCount("candidaturas"),
+        getCount("empresas"),
+        getCount("candidaturas", q => q.eq("status", "contratado"))
+      ]);
 
-      const { data: jobData } = await supabase
-        .from("vagas")
-        .select("*, empresas(name)")
-        .eq("status", "aberta")
-        .eq("franquia_id", profile.franquiaId || "rio-verde");
-
-      if (jobData) {
-        setJobs(jobData.map((j: any) => ({
-          id: j.id,
-          title: j.title,
-          companyId: j.company_id,
-          companyName: j.company_name || j.empresas?.name || "Empresa Parceira",
-          franquiaId: j.franquia_id,
-          description: j.description,
-          requiredSkills: j.required_skills || [],
-          status: j.status,
-          openingDate: j.opening_date,
-          closingForecast: j.closing_forecast,
-          selectionProcessType: j.selection_process_type,
-          createdAt: j.created_at
-        })) as any);
-      }
-
-      const { data: appData } = await supabase
-        .from("candidaturas")
-        .select("*")
-        .eq("student_id", profile.id);
-
-      if (appData) {
-        setUserApplications(appData.map((a: any) => ({
-          id: a.id,
-          jobId: a.job_id,
-          studentId: a.student_id,
-          matchScore: a.match_score,
-          status: a.status,
-          statusHistory: a.status_history || [],
-          appliedAt: a.applied_at
-        })));
-      }
-    };
-
-    fetchAtsData();
-  }, [profile.id, profile.franquiaId]);
-
-  useEffect(() => {
-    const fetchEnrollments = async () => {
-      if (!profile.id) return;
-
-      const { data } = await supabase
-        .from("matriculas")
-        .select("*")
-        .eq("aluno_id", profile.id);
-
-      if (data && data.length > 0) {
-        const list = data.map((e: any) => ({
-          courseId: e.course_id,
-          courseName: e.course_name || "Informática Profissional",
-          currentLesson: e.current_lesson || 1,
-          unlockedBadges: e.unlocked_badges || []
-        })) as any[];
-        setEnrollments(list);
-
-        const active = list.find(e => e.courseId === profile.currentCourseId) || list[0] || null;
-        setActiveEnrollment(active);
-
-        if (active) {
-          const { module: m, relativeLesson: l } = getRelativeLesson(active.currentLesson);
-          setModule(m);
-          setClassNum(l);
-        }
-      } else {
-        const defaultEnrollment: any = {
-          courseId: profile.currentCourseId || "INF",
-          courseName: "Informática Profissional",
-          currentLesson: 1,
-          unlockedBadges: unlockedBadges || []
-        };
-        setEnrollments([defaultEnrollment]);
-        setActiveEnrollment(defaultEnrollment);
-      }
-    };
-
-    fetchEnrollments();
-  }, [profile.id, profile.currentCourseId, unlockedBadges]);
-
-  useEffect(() => {
-    const fetchMissions = async () => {
-      if (!profile.id) return;
-
-      const { data, error } = await supabase
-        .from("missoes")
-        .select("*")
-        .eq("student_id", profile.id)
-        .order("created_at", { ascending: false });
-
-      if (data && !error) {
-        const missionData: Mission[] = data.map((m: any) => ({
-          id: m.id,
-          studentId: m.student_id,
-          studentName: m.student_name,
-          franquiaId: m.franquia_id,
-          turma: m.turma,
-          courseId: m.course_id,
-          courseName: m.course_name,
-          module: m.module,
-          classNum: m.class_num,
-          content: m.content,
-          status: m.status,
-          aiFeedback: m.ai_feedback,
-          xpAwarded: m.xp_awarded || 0,
-          createdAt: m.created_at,
-          approvedAt: m.approved_at,
-          approvedBy: m.approved_by
-        }));
-        setMissions(missionData);
-        checkBadges(missionData);
-      }
-    };
-
-    fetchMissions();
-  }, [profile.id]);
-
-  const checkBadges = async (missionData: Mission[]) => {
-    const approvedMissions = missionData.filter(m => m.status !== "pending");
-    const completedClasses = new Set(approvedMissions.map(m => m.classNum));
-    const maxClass = Math.max(0, ...Array.from(completedClasses));
-
-    const badgesToUse = activeCourse?.badges || BADGES;
-    const newBadges = badgesToUse.filter(badge => 
-      maxClass >= (badge.unlockClass || 0) && !unlockedBadges.includes(badge.id)
-    );
-
-    if (newBadges.length > 0) {
-      const newBadgeIds = newBadges.map(b => b.id);
-      const updatedBadges = Array.from(new Set([...unlockedBadges, ...newBadgeIds]));
-
-      await supabase
-        .from("usuarios")
-        .update({ unlocked_badges: updatedBadges })
-        .eq("id", profile.id);
-
-      setUnlockedBadges(updatedBadges);
-
-      const courseId = activeEnrollment?.courseId || "INF";
-      await supabase
-        .from("matriculas")
-        .update({ unlocked_badges: updatedBadges })
-        .eq("aluno_id", profile.id)
-        .eq("course_id", courseId);
-      
-      setNewBadge(newBadges[0]);
-      fireConfetti();
+      setCounts({
+        users: { total: totalUsers, aluno: alunoCount, professor: profCount, coordenador: coordCount, rh: rhCount, pending: pendMis, active: activeCount },
+        missions: { total: totalMis, pending: pendMis, approved: appMis, bonus: bonMis },
+        ats: { jobs: jobCount, applications: appCount, companies: compCount, hired: hiredCount }
+      });
+    } catch (err) {
+      console.error("Erro ao buscar contadores:", err);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (content.length < 50) return;
+  useEffect(() => {
+    setPage(0);
+    fetchUsers(true);
+  }, [selectedFranquia, profile.franquiaId, profile.role, roleFilter, turmaFilter, searchQuery]);
 
+  const fetchUsers = async (reset = false) => {
     setLoading(true);
-    setAiFeedback("IA analisando seu relatório...");
-
-    const sanitizedContent = sanitizeText(content);
-
-    setTimeout(async () => {
-      let feedback = "Excelente registro! Vi que você dominou habilidades cruciais hoje. Continue assim!";
-
-      try {
-        const courseId = activeEnrollment?.courseId || "INF";
-        const courseName = activeEnrollment?.courseName || "Informática Profissional";
-        const absLesson = getAbsoluteLessonId(module, classNum);
-
-        const { data: newMission, error } = await supabase
-          .from("missoes")
-          .insert({
-            student_id: profile.id,
-            student_name: profile.displayName,
-            franquia_id: profile.franquiaId || "rio-verde",
-            turma: profile.turma || "024inf",
-            course_id: courseId,
-            course_name: courseName,
-            module,
-            class_num: absLesson,
-            content: sanitizedContent,
-            status: "pending",
-            ai_feedback: feedback,
-            xp_awarded: 0
-          })
-          .select()
-          .single();
-
-        if (error) throw error;
-
-        if (newMission) {
-          setMissions(prev => [{
-            id: newMission.id,
-            studentId: newMission.student_id,
-            studentName: newMission.student_name,
-            franquiaId: newMission.franquia_id,
-            turma: newMission.turma,
-            courseId: newMission.course_id,
-            courseName: newMission.course_name,
-            module: newMission.module,
-            classNum: newMission.class_num,
-            content: newMission.content,
-            status: newMission.status,
-            aiFeedback: newMission.ai_feedback,
-            xpAwarded: newMission.xp_awarded,
-            createdAt: newMission.created_at
-          }, ...prev]);
-        }
-
-        if (activeEnrollment && absLesson > activeEnrollment.currentLesson) {
-          await supabase
-            .from("matriculas")
-            .update({ current_lesson: absLesson })
-            .eq("aluno_id", profile.id)
-            .eq("course_id", courseId);
-        }
-
-        fireConfetti();
-        setContent("");
-        setAiFeedback(feedback);
-        setTimeout(() => setAiFeedback(null), 5000);
-      } catch (err: any) {
-        alert("Erro ao enviar missão: " + err.message);
-      } finally {
-        setLoading(false);
-      }
-    }, 2000);
-  };
-
-  const handleProfileUpdate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setUploadingProfile(true);
     try {
-      let resumeUrl = profile.resumeUrl || "";
+      const currentPage = reset ? 0 : page;
+      const from = currentPage * usersPerPage;
+      const to = from + usersPerPage - 1;
 
-      if (resumeFile) {
-        if (resumeFile.size > 5 * 1024 * 1024) {
-          alert("O currículo deve ter no máximo 5MB.");
-          setUploadingProfile(false);
-          return;
-        }
-        const { ref: storageRef, uploadBytes, getDownloadURL } = await import("firebase/storage");
-        const { storage } = await import("../firebase");
-        const resumeRef = storageRef(storage, `resumes/${profile.uid}/curriculo.pdf`);
-        await uploadBytes(resumeRef, resumeFile);
-        resumeUrl = await getDownloadURL(resumeRef);
+      let q = supabase.from("usuarios").select("*").range(from, to).order("display_name", { ascending: true });
+
+      if (profile.role !== "master") {
+        q = q.eq("franquia_id", profile.franquiaId);
+      } else if (selectedFranquia !== "all") {
+        q = q.eq("franquia_id", selectedFranquia);
       }
 
-      await supabase
-        .from("usuarios")
-        .update({
-          skills: selectedSkills,
-          resume_url: resumeUrl
-        })
-        .eq("id", profile.id);
+      if (roleFilter !== "all") q = q.eq("role", roleFilter);
+      if (turmaFilter !== "all") q = q.eq("turma", turmaFilter);
 
-      alert("Perfil profissional atualizado com sucesso!");
-    } catch (error) {
-      console.error("Erro ao atualizar perfil:", error);
-      alert("Erro ao atualizar perfil profissional.");
-    } finally {
-      setUploadingProfile(false);
-    }
-  };
+      if (searchQuery.trim()) {
+        const isCode = /^\d+$/.test(searchQuery);
+        if (isCode) {
+          q = q.ilike("codigo", `%${searchQuery}%`);
+        } else {
+          q = q.or(`display_name.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%`);
+        }
+      }
 
-  const handleApply = async (job: JobPosting) => {
-    if (profile.availabilityStatus === 'Bloqueado') {
-      alert("Seu perfil está bloqueado para novos encaminhamentos conforme as normas da agência. Procure a coordenação para mais informações.");
-      return;
-    }
-
-    if (!selectedSkills || selectedSkills.length === 0) {
-      alert("Por favor, preencha suas habilidades no perfil profissional antes de se candidatar.");
-      return;
-    }
-
-    setApplyingJobId(job.id);
-    try {
-      const studentSkills = selectedSkills;
-      const requiredSkills = job.requiredSkills;
-      
-      const commonSkills = studentSkills.filter(skill => requiredSkills.includes(skill));
-      const score = requiredSkills.length > 0 ? Math.round((commonSkills.length / requiredSkills.length) * 100) : 100;
-
-      const { data, error } = await supabase
-        .from("candidaturas")
-        .insert({
-          job_id: job.id,
-          student_id: profile.id,
-          match_score: score,
-          status: 'pendente',
-          status_history: [{ status: 'pendente', timestamp: new Date().toISOString() }]
-        })
-        .select()
-        .single();
-
+      const { data, error } = await q;
       if (error) throw error;
 
-      if (data) {
-        setUserApplications(prev => [...prev, {
-          id: data.id,
-          jobId: data.job_id,
-          studentId: data.student_id,
-          matchScore: data.match_score,
-          status: data.status,
-          statusHistory: data.status_history,
-          appliedAt: data.applied_at
-        }]);
+      const mappedUsers: UserProfile[] = (data || []).map((u: any) => ({
+        id: u.id,
+        uid: u.uid || u.id,
+        email: u.email,
+        displayName: u.display_name,
+        codigo: u.codigo,
+        role: u.role,
+        franquiaId: u.franquia_id,
+        turma: u.turma,
+        xp: u.xp || 0,
+        skills: u.skills || [],
+        resumeUrl: u.resume_url,
+        availabilityStatus: u.availability_status,
+        withdrawalReason: u.withdrawal_reason,
+        unlockedBadges: u.unlocked_badges || [],
+        currentCourseId: u.current_course_id,
+        atsTermsAccepted: u.ats_terms_accepted,
+        atsTermsAcceptedAt: u.ats_terms_accepted_at,
+        perceptions: u.perceptions,
+        employmentHistory: u.employment_history,
+        createdAt: u.created_at,
+        lastLogin: u.last_login
+      }));
+
+      if (reset) {
+        setUsers(mappedUsers);
+        setPage(1);
+      } else {
+        setUsers(prev => [...prev, ...mappedUsers]);
+        setPage(prev => prev + 1);
       }
 
-      alert(`Candidatura enviada! Seu Match Score é ${score}%.`);
-    } catch (error: any) {
-      alert("Erro ao enviar candidatura: " + error.message);
+      setHasMore(mappedUsers.length === usersPerPage);
+    } catch (err: any) {
+      console.error("Erro ao buscar usuários do Supabase:", err);
     } finally {
-      setApplyingJobId(null);
+      setLoading(false);
     }
   };
 
-  const hasApplied = (jobId: string) => userApplications.some(app => app.jobId === jobId);
+  useEffect(() => {
+    setMissionsPage(0);
+    fetchMissions(true);
+  }, [selectedFranquia, profile.franquiaId, profile.role, activityStatusFilter, activitySearch, dateFilter]);
 
-  const [acceptTerms, setAcceptTerms] = useState(false);
-  const [loadingTerms, setLoadingTerms] = useState(false);
-
-  const handleAcceptTerms = async () => {
-    if (!acceptTerms) return;
-    setLoadingTerms(true);
+  const fetchMissions = async (reset = false) => {
+    setLoading(true);
     try {
-      await supabase
-        .from("usuarios")
-        .update({
-          ats_terms_accepted: true,
-          ats_terms_accepted_at: new Date().toISOString()
-        })
-        .eq("id", profile.id);
+      const currentPage = reset ? 0 : missionsPage;
+      const from = currentPage * usersPerPage;
+      const to = from + usersPerPage - 1;
 
-      window.location.reload();
-    } catch (error: any) {
-      alert("Erro ao aceitar termos: " + error.message);
+      let q = supabase.from("missoes").select("*").range(from, to).order("created_at", { ascending: false });
+
+      if (profile.role !== "master") {
+        q = q.eq("franquia_id", profile.franquiaId);
+      } else if (selectedFranquia !== "all") {
+        q = q.eq("franquia_id", selectedFranquia);
+      }
+
+      if (activityStatusFilter !== "all") q = q.eq("status", activityStatusFilter);
+      if (dateFilter.start) q = q.gte("created_at", dateFilter.start);
+      if (dateFilter.end) q = q.lte("created_at", `${dateFilter.end}T23:59:59`);
+      if (activitySearch.trim()) q = q.or(`student_name.ilike.%${activitySearch}%,module.ilike.%${activitySearch}%,content.ilike.%${activitySearch}%`);
+
+      const { data, error } = await q;
+      if (error) throw error;
+
+      const mappedMissions: Mission[] = (data || []).map((m: any) => ({
+        id: m.id,
+        studentId: m.student_id,
+        studentName: m.student_name || "Aluno",
+        franquiaId: m.franquia_id,
+        turma: m.turma,
+        courseId: m.course_id,
+        courseName: m.course_name,
+        module: m.module,
+        classNum: m.class_num,
+        content: m.content,
+        status: m.status,
+        aiFeedback: m.ai_feedback,
+        xpAwarded: m.xp_awarded || 0,
+        createdAt: m.created_at,
+        approvedAt: m.approved_at,
+        approvedBy: m.approved_by
+      }));
+
+      if (reset) {
+        setAllMissions(mappedMissions);
+        setMissionsPage(1);
+      } else {
+        setAllMissions(prev => [...prev, ...mappedMissions]);
+        setMissionsPage(prev => prev + 1);
+      }
+
+      setHasMoreMissions(mappedMissions.length === usersPerPage);
+    } catch (err) {
+      console.error("Erro ao buscar missões do Supabase:", err);
     } finally {
-      setLoadingTerms(false);
+      setLoading(false);
     }
   };
 
-  const currentRank = RANKS.reduce((prev, curr) => (currentXP >= curr.minXP ? curr : prev), RANKS[0]);
-  const nextRank = RANKS.find(r => r.minXP > currentXP) || null;
-  const progress = nextRank 
-    ? ((currentXP - currentRank.minXP) / (nextRank.minXP - currentRank.minXP)) * 100 
-    : 100;
+  const handleApproveMission = async (mission: Mission, bonus: boolean) => {
+    setLoading(true);
+    const xp = bonus ? XP_BONUS : XP_PER_MISSION;
+
+    try {
+      await supabase.from("missoes").update({
+        status: bonus ? "bonus" : "approved",
+        xp_awarded: xp,
+        approved_at: new Date().toISOString(),
+        approved_by: profile.uid
+      }).eq("id", mission.id);
+
+      const { data: userCurrent } = await supabase.from("usuarios").select("xp").eq("id", mission.studentId).single();
+      const currentXP = userCurrent?.xp || 0;
+      await supabase.from("usuarios").update({ xp: currentXP + xp }).eq("id", mission.studentId);
+
+      setAllMissions(prev => prev.map(m => m.id === mission.id ? { ...m, status: bonus ? "bonus" : "approved", xpAwarded: xp } : m));
+      setSelectedMissionForView(null);
+      fetchCounts();
+      setSuccessMsg("Missão aprovada com sucesso!");
+      setTimeout(() => setSuccessMsg(""), 3000);
+    } catch (err: any) {
+      alert("Erro ao aprovar missão: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRejectMission = async (mission: Mission) => {
+    setLoading(true);
+    try {
+      await supabase.from("missoes").update({
+        status: "rejected",
+        approved_by: profile.uid
+      }).eq("id", mission.id);
+
+      setAllMissions(prev => prev.map(m => m.id === mission.id ? { ...m, status: "rejected" } : m));
+      setSelectedMissionForView(null);
+      fetchCounts();
+      setSuccessMsg("Missão rejeitada.");
+      setTimeout(() => setSuccessMsg(""), 3000);
+    } catch (err: any) {
+      alert("Erro ao rejeitar missão: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUser.nome || !newUser.senha) {
+      alert("Nome e Senha são obrigatórios.");
+      return;
+    }
+    if (newUser.role !== "master" && !newUser.franquiaId) {
+      alert("Selecione uma unidade para este usuário.");
+      return;
+    }
+
+    setLoading(true);
+    setSuccessMsg("");
+
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const response = await fetch("/api/users/create", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(newUser),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao criar usuário");
+      }
+
+      setSuccessMsg("Usuário cadastrado com sucesso!");
+      setNewUser({ 
+        nome: "", 
+        email: "", 
+        codigo: "", 
+        senha: "", 
+        role: "aluno", 
+        franquiaId: profile.franquiaId || "",
+        turma: ""
+      });
+      fetchCounts();
+      fetchUsers(true);
+      setTimeout(() => {
+        setShowAddUser(false);
+        setSuccessMsg("");
+      }, 2000);
+    } catch (err: any) {
+      console.error("Erro ao criar usuário:", err);
+      alert("Erro ao criar usuário: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePreviewImport = () => {
+    if (!importText.trim()) return;
+    const results = Papa.parse(importText, { 
+      header: true, 
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim(),
+      delimitersToGuess: [',', ';', '\t', '|']
+    });
+    setImportPreview(results.data as any[]);
+  };
+
+  const handleImportStudents = async () => {
+    if (!importText.trim()) return;
+    setLoading(true);
+    setSuccessMsg("");
+    
+    const results = Papa.parse(importText, { 
+      header: true, 
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim(),
+      delimitersToGuess: [',', ';', '\t', '|']
+    });
+    
+    const rows = results.data as any[];
+    if (rows.length === 0) {
+      alert("Nenhum dado válido detectado. Verifique se o cabeçalho está correto.");
+      setLoading(false);
+      return;
+    }
+
+    const studentsToImport = rows.map(row => {
+      const nome = row["Nome Completo"] || row["nome"];
+      const codigo = row["Código"] || row["codigo"] || row["Matrícula"] || row["matricula"];
+      const email = row["Email"] || row["email"];
+      const senha = row["Senha Temporária"] || row["senha"] || (codigo ? String(codigo) : "nome123");
+      const unidadeInput = row["Unidade"] || row["unidade"];
+      const turma = row["Turma"] || row["turma"];
+
+      let finalUnidadeId = unidadeInput;
+      const normalize = (s: string) => s.toLowerCase().replace(/[-_]/g, " ").trim();
+      const normalizedInput = normalize(unidadeInput || "");
+      
+      const foundFranquia = franquias.find(f => 
+        f.id === unidadeInput || 
+        normalize(f.nome) === normalizedInput ||
+        normalize(f.cidade) === normalizedInput
+      );
+      
+      if (foundFranquia) finalUnidadeId = foundFranquia.id;
+
+      return { nome, codigo, email, senha, franquiaId: finalUnidadeId, turma };
+    });
+
+    setImportProgress({ current: 0, total: studentsToImport.length });
+
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      const response = await fetch("/api/students/import", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ 
+          students: studentsToImport,
+          courseId: selectedCourseId,
+          courseName: courses.find(c => c.id === selectedCourseId)?.title || "Informática"
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao importar alunos");
+      }
+
+      const importResult = await response.json();
+      setSuccessMsg(`${importResult.success} alunos importados com sucesso!`);
+      setImportText("");
+      setImportPreview([]);
+      fetchCounts();
+      fetchUsers(true);
+      setTimeout(() => {
+        setShowImportModal(false);
+        setSuccessMsg("");
+      }, 3000);
+    } catch (err: any) {
+      alert("Erro na importação: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUploadBackupToSupabase = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportingToSupabase(true);
+    setSupabaseImportReport(null);
+
+    try {
+      const text = await file.text();
+      const jsonData = JSON.parse(text);
+
+      const res = await fetch("/api/maintenance/import-backup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(jsonData),
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Erro na importação");
+
+      setSupabaseImportReport(result.report);
+      setSuccessMsg("Dados carregados com sucesso no Supabase!");
+      fetchCounts();
+      fetchUsers(true);
+      fetchMissions(true);
+      setTimeout(() => setSuccessMsg(""), 5000);
+    } catch (err: any) {
+      console.error("Erro na importação para Supabase:", err);
+      alert("Erro na importação: " + (err.message || "Erro desconhecido"));
+    } finally {
+      setImportingToSupabase(false);
+      e.target.value = "";
+    }
+  };
+
+  const handleGlobalXPSync = async () => {
+    if (!confirm("ATENÇÃO: Isso irá recalcular o saldo de XP de TODOS os alunos com base no histórico de missões aprovadas e bônus. Deseja continuar?")) return;
+    
+    setLoading(true);
+    try {
+      let allUsers: any[] = [];
+      let uPage = 0;
+      let uHasMore = true;
+      
+      while(uHasMore) {
+        const { data: uData, error: uErr } = await supabase
+          .from("usuarios")
+          .select("id, uid, codigo, franquia_id")
+          .order('created_at')
+          .range(uPage * 1000, (uPage + 1) * 1000 - 1);
+        
+        if (uErr) throw uErr;
+        if (uData && uData.length > 0) {
+          allUsers = [...allUsers, ...uData];
+          uPage++;
+        } else {
+          uHasMore = false;
+        }
+      }
+
+      const userMap: Record<string, string> = {};
+      allUsers.forEach(u => {
+        const uId = String(u.id).trim();
+        userMap[uId] = uId; 
+        if (u.uid) userMap[String(u.uid).trim()] = uId; 
+        if (u.codigo) {
+           const cod = String(u.codigo).trim();
+           userMap[cod] = uId;
+           if (u.franquia_id) {
+               const fId = String(u.franquia_id).trim();
+               userMap[`${fId}_${cod}`] = uId; 
+           }
+        }
+      });
+
+      let allMissionsFromDB: any[] = [];
+      let mPage = 0;
+      let mHasMore = true;
+
+      while (mHasMore) {
+        const { data: mData, error: mErr } = await supabase
+          .from("missoes")
+          .select("student_id, status, xp_awarded")
+          .in("status", ["approved", "bonus"])
+          .order('created_at') 
+          .range(mPage * 1000, (mPage + 1) * 1000 - 1);
+
+        if (mErr) throw mErr;
+
+        if (mData && mData.length > 0) {
+          allMissionsFromDB = [...allMissionsFromDB, ...mData];
+          mPage++;
+        } else {
+          mHasMore = false;
+        }
+      }
+
+      const xpMap: Record<string, number> = {};
+      allMissionsFromDB.forEach(m => {
+        const xp = (m.xp_awarded !== null && m.xp_awarded !== undefined) 
+           ? Number(m.xp_awarded) 
+           : (m.status === 'bonus' ? XP_BONUS : XP_PER_MISSION);
+           
+        const sId = String(m.student_id).trim();
+        const canonicalId = userMap[sId] || sId; 
+
+        if (!xpMap[canonicalId]) xpMap[canonicalId] = 0;
+        xpMap[canonicalId] += xp;
+      });
+
+      let successCount = 0;
+      const updates = Object.entries(xpMap);
+      const chunkSize = 20; 
+      
+      for (let i = 0; i < updates.length; i += chunkSize) {
+        const chunk = updates.slice(i, i + chunkSize);
+        await Promise.all(
+          chunk.map(async ([id, totalXp]) => {
+            const { error } = await supabase.from("usuarios").update({ xp: totalXp }).eq("id", id);
+            if (!error) successCount++;
+            else console.error(`Erro ao atualizar XP para ID ${id}:`, error.message);
+          })
+        );
+      }
+
+      alert(`Sincronização global concluída! Saldo de XP de ${successCount} alunos foram recalculados e corrigidos com sucesso.`);
+      
+      fetchCounts();
+      fetchUsers(true); 
+
+    } catch (err: any) {
+      console.error("Erro ao sincronizar XP:", err);
+      alert("Erro ao recalcular XP: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const totalAlunos = counts.users.aluno;
+  const avgXP = totalAlunos > 0 ? Math.round(users.filter(u => u.role === "aluno").reduce((acc, curr) => acc + (curr.xp || 0), 0) / (users.filter(u => u.role === "aluno").length || 1)) : 0;
 
   return (
-    <div className="max-w-6xl mx-auto p-4 md:p-8 space-y-8">
-      <AnimatePresence>
-        {newBadge && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
-            <motion.div 
-              initial={{ scale: 0, rotate: -180 }}
-              animate={{ scale: 1, rotate: 0 }}
-              exit={{ scale: 0, rotate: 180 }}
-              className="glass-card p-12 text-center space-y-8 max-w-sm relative overflow-hidden"
-            >
-              <div className="absolute inset-0 bg-gradient-to-b from-mult-orange/20 to-transparent pointer-events-none" />
-              
-              <motion.div 
-                animate={{ 
-                  scale: [1, 1.2, 1],
-                  rotate: [0, 5, -5, 0]
-                }}
-                transition={{ repeat: Infinity, duration: 3 }}
-                className="w-32 h-32 bg-mult-orange/20 rounded-full flex items-center justify-center mx-auto neon-glow-orange border-2 border-mult-orange/50"
-              >
-                {iconMap[newBadge.icon] ? (
-                  React.createElement(iconMap[newBadge.icon], { className: "w-16 h-16 text-mult-orange" })
-                ) : (
-                  <Trophy className="w-16 h-16 text-mult-orange" />
-                )}
-              </motion.div>
-
-              <div className="space-y-2">
-                <h2 className="text-3xl font-black tracking-tighter text-white">NOVA <span className="text-mult-orange">MEDALHA!</span></h2>
-                <p className="text-xl font-bold text-neon-blue uppercase tracking-widest">{newBadge.name}</p>
-                <p className="text-gray-400 text-sm italic">"{newBadge.description}"</p>
-              </div>
-
-              <button 
-                onClick={() => setNewBadge(null)}
-                className="w-full bg-mult-orange text-white font-black py-4 rounded-xl transition-all neon-glow-orange uppercase tracking-widest text-xs"
-              >
-                RECEBER RECOMPENSA
-              </button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div className="flex items-center gap-4">
-          <div className="w-10 h-10 sm:w-12 sm:h-12 bg-mult-orange/20 rounded-xl flex items-center justify-center neon-glow-orange border border-mult-orange/30">
-            <Rocket className="text-mult-orange w-5 h-5 sm:w-6 sm:h-6" />
-          </div>
+    <div className="max-w-7xl mx-auto p-6 md:p-10 space-y-10">
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+        <div className="flex items-center justify-between w-full md:w-auto">
           <div>
-            <h1 className="text-xl sm:text-2xl font-black tracking-tighter leading-none">MULT <span className="text-mult-orange">PROFISSÕES</span></h1>
-            <p className="text-[9px] sm:text-[10px] font-black text-gray-500 uppercase tracking-widest mt-1">
-              {activeEnrollment ? activeEnrollment.courseName : "Cockpit v2.0"} • Piloto {profile.displayName.split(' ')[0]}
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-mult-orange/20 rounded-xl flex items-center justify-center neon-glow-orange border border-mult-orange/30">
+                <Rocket className="text-mult-orange w-6 h-6" />
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-black tracking-tighter leading-none">
+                MULT <span className="text-mult-orange">PROFISSÕES</span>
+              </h1>
+            </div>
+            <p className="text-gray-500 text-[10px] sm:text-xs font-bold uppercase tracking-widest mt-2 ml-1">
+              {profile.role === "master" ? "Gestão Global Master (Supabase)" : `Unidade: ${franquias.find(f => f.id === profile.franquiaId)?.nome || "Carregando..."}`}
             </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {enrollments.length > 1 && (
-            <select 
-              value={profile.currentCourseId}
-              onChange={async (e) => {
-                await supabase.from("usuarios").update({ current_course_id: e.target.value }).eq("id", profile.id);
-                window.location.reload();
-              }}
-              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[10px] font-black uppercase tracking-widest focus:outline-none focus:border-neon-blue transition-all mr-2"
-            >
-              {enrollments.map(e => (
-                <option key={e.courseId} value={e.courseId} className="bg-cockpit-bg">
-                  {e.courseName}
-                </option>
-              ))}
-            </select>
-          )}
-          <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 mr-4">
-            <button 
-              onClick={() => setActiveTab("missions")}
-              className={cn(
-                "px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all",
-                activeTab === "missions" ? "bg-mult-orange text-white neon-glow-orange" : "text-gray-500 hover:text-gray-300"
-              )}
-            >
-              Missões
-            </button>
-            <button 
-              onClick={() => setActiveTab("ats")}
-              className={cn(
-                "px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all",
-                activeTab === "ats" ? "bg-neon-blue text-white neon-glow-blue" : "text-gray-500 hover:text-gray-300"
-              )}
-            >
-              Agência
-            </button>
           </div>
           <button 
             onClick={() => auth.signOut()}
-            className="p-2 rounded-full hover:bg-white/10 transition-colors text-gray-400"
+            className="md:hidden p-3 rounded-xl bg-white/5 hover:bg-red-500/10 hover:text-red-400 transition-all text-gray-500 border border-white/5"
           >
             <LogOut className="w-5 h-5" />
           </button>
         </div>
+        <div className="hidden md:flex items-center gap-4">
+          <button 
+            onClick={() => auth.signOut()}
+            className="p-3 rounded-xl bg-white/5 hover:bg-red-500/10 hover:text-red-400 transition-all text-gray-500 border border-white/5"
+          >
+            <LogOut className="w-5 h-5" />
+          </button>
+        </div>
+      </header>
+
+      <div className="flex items-center gap-2 p-1 bg-white/5 rounded-2xl w-fit border border-white/5">
+        {profile.role !== "rh" && (
+          <>
+            <button
+              onClick={() => setActiveTab("users")}
+              className={cn(
+                "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                activeTab === "users" ? "bg-neon-blue text-black neon-glow-blue" : "text-gray-500 hover:text-white"
+              )}
+            >
+              <Users className="w-4 h-4" /> Gestão de Usuários
+            </button>
+            <button
+              onClick={() => setActiveTab("activities")}
+              className={cn(
+                "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                activeTab === "activities" ? "bg-mult-orange text-white neon-glow-orange" : "text-gray-500 hover:text-white"
+              )}
+            >
+              <FileText className="w-4 h-4" /> Atividades dos Alunos
+            </button>
+          </>
+        )}
+        {["master", "coordenador", "rh"].includes(profile.role) && (
+          <button
+            onClick={() => setActiveTab("ats")}
+            className={cn(
+              "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
+              activeTab === "ats" ? "bg-green-500 text-black neon-glow-green" : "text-gray-500 hover:text-white"
+            )}
+          >
+            <Briefcase className="w-4 h-4" /> Agência (ATS)
+          </button>
+        )}
+        {profile.role === "master" && (
+          <>
+            <button
+              onClick={() => setActiveTab("courses")}
+              className={cn(
+                "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                activeTab === "courses" ? "bg-mult-orange text-white neon-glow-orange" : "text-gray-500 hover:text-white"
+              )}
+            >
+              <BookOpen className="w-4 h-4" /> Gestão de Cursos
+            </button>
+            <button
+              onClick={() => setActiveTab("maintenance")}
+              className={cn(
+                "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
+                activeTab === "maintenance" ? "bg-red-500 text-white neon-glow-red" : "text-gray-500 hover:text-white"
+              )}
+            >
+              <Settings className="w-4 h-4" /> Manutenção
+            </button>
+          </>
+        )}
       </div>
 
-      {activeTab === "missions" ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left Column: Player Card & Badges */}
-        <div className="space-y-8">
-          {/* Player Card */}
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="glass-card p-6 relative overflow-hidden"
-          >
-            <div className="flex items-center gap-4 mb-6">
-              <div className="w-16 h-16 rounded-full bg-neon-blue/20 flex items-center justify-center neon-glow-blue border border-neon-blue/30">
-                <UserIcon className="text-neon-blue w-8 h-8" />
-              </div>
-              <div>
-                <h2 className="text-xl font-bold">{profile.displayName}</h2>
-                <p className={cn("text-sm font-bold uppercase tracking-widest", currentRank.color)}>
-                  {currentRank.name}
-                </p>
-              </div>
+      <div className="flex flex-col gap-6">
+        <div className="glass-card p-5 sm:p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6 w-full md:w-auto">
+            <div className="flex items-center gap-3 shrink-0">
+              <Filter className="w-4 h-4 text-gray-500" />
+              <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Filtrar Unidade</span>
             </div>
-
-            <div className="space-y-2">
-              <div className="flex justify-between text-xs font-bold uppercase tracking-widest text-gray-400">
-                <span>XP: <XPCounter value={currentXP} /></span>
-                {nextRank && <span>Próximo: {nextRank.minXP} XP</span>}
-              </div>
-              <div className="h-3 bg-white/5 rounded-full overflow-hidden border border-white/10">
-                <motion.div 
-                  initial={{ width: 0 }}
-                  animate={{ width: `${progress}%` }}
-                  className="h-full bg-gradient-to-r from-neon-blue to-mult-orange neon-glow-blue"
-                />
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Badges Showcase */}
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.1 }}
-            className="glass-card p-6"
-          >
-            <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-4 flex items-center gap-2">
-              <Trophy className="w-4 h-4 text-mult-orange" /> Medalhas Conquistadas
-            </h3>
-            <div className="grid grid-cols-4 sm:grid-cols-5 gap-3 sm:gap-4">
-              {(activeCourse?.badges || BADGES).map((badge) => {
-                const Icon = iconMap[badge.icon] || Trophy;
-                const isUnlocked = unlockedBadges?.includes(badge.id);
-                return (
-                  <div 
-                    key={badge.id}
-                    title={`${badge.name}: ${badge.description}`}
-                    className={cn(
-                      "aspect-square rounded-xl flex items-center justify-center transition-all border",
-                      isUnlocked 
-                        ? "bg-mult-orange/20 border-mult-orange text-mult-orange neon-glow-orange scale-105 sm:scale-110" 
-                        : "bg-white/5 border-white/10 text-gray-600 grayscale opacity-50"
-                    )}
-                  >
-                    {badge.icon.startsWith('http') ? (
-                      <img src={badge.icon} alt={badge.name} className="w-5 h-5 sm:w-6 sm:h-6 object-contain" />
-                    ) : (
-                      <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </motion.div>
-        </div>
-
-        {/* Middle Column: Mission Control (Form) */}
-        <div className="lg:col-span-2 space-y-8">
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="glass-card p-5 sm:p-8 relative"
-          >
-            <div className="absolute top-0 right-0 p-4">
-              <Zap className="text-mult-orange w-5 h-5 sm:w-6 sm:h-6 animate-pulse" />
-            </div>
-            
-            <h2 className="text-xl sm:text-2xl font-bold mb-6 flex items-center gap-2">
-              <Send className="text-neon-blue w-5 h-5 sm:w-6 sm:h-6" /> MISSION CONTROL
-            </h2>
-
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Módulo</label>
-                  <select 
-                    value={module}
-                    onChange={(e) => {
-                      setModule(e.target.value);
-                      setClassNum(1);
-                    }}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg p-3 focus:outline-none focus:border-neon-blue text-white"
-                  >
-                    {["Windows", "Internet", "Word", "PowerPoint", "Excel"].map(m => <option key={m} value={m} className="bg-cockpit-bg">{m}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Aula</label>
-                  <select 
-                    value={classNum}
-                    onChange={(e) => setClassNum(Number(e.target.value))}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg p-3 focus:outline-none focus:border-neon-blue text-white"
-                  >
-                    {getLessonsForModule(module).map(c => <option key={c} value={c} className="bg-cockpit-bg">Aula {c}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex justify-between">
-                  <span>Diário de Bordo (O que aprendi hoje e minha meta)</span>
-                  <span className={cn(content.length < 50 ? "text-red-400" : "text-green-400")}>
-                    {content.length}/50
-                  </span>
-                </label>
-                <textarea 
-                  required
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  placeholder="Descreva seu aprendizado..."
-                  className="w-full bg-white/5 border border-white/10 rounded-lg p-4 h-40 focus:outline-none focus:border-neon-blue resize-none"
-                />
-              </div>
-
-              <AnimatePresence>
-                {aiFeedback && (
-                  <motion.div 
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="p-4 bg-neon-blue/10 border border-neon-blue/30 rounded-lg text-sm text-neon-blue italic"
-                  >
-                    {aiFeedback}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              <button 
-                type="submit"
-                disabled={loading || content.length < 50}
-                className="w-full bg-gradient-to-r from-mult-orange to-orange-600 text-white font-bold py-4 rounded-xl transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 neon-glow-orange flex items-center justify-center gap-2"
-              >
-                {loading ? "PROCESSANDO DADOS..." : "ENVIAR MISSÃO"}
-              </button>
-            </form>
-          </motion.div>
-
-          {/* Recent Missions List */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 flex items-center gap-2">
-              <Clock className="w-4 h-4" /> Histórico de Missões
-            </h3>
-            <div className="space-y-3">
-              {missions.map((mission) => (
-                <motion.div 
-                  key={mission.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  onClick={() => setSelectedMission(mission)}
-                  className="glass-card p-4 flex items-center justify-between group hover:border-neon-blue/30 transition-all cursor-pointer"
-                >
-                  <div className="flex items-center gap-3 sm:gap-4">
-                    <div className={cn(
-                      "w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center shrink-0",
-                      mission.status === "pending" ? "bg-gray-500/20 text-gray-500" : "bg-neon-blue/20 text-neon-blue"
-                    )}>
-                      {mission.status === "pending" ? <Clock className="w-4 h-4 sm:w-5 sm:h-5" /> : <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5" />}
-                    </div>
-                    <div className="min-w-0">
-                      <h4 className="font-bold text-xs sm:text-sm truncate">{getRelativeLesson(mission.classNum).label}</h4>
-                      <p className="text-[10px] sm:text-xs text-gray-500">{new Date(mission.createdAt).toLocaleDateString()}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 sm:gap-4 shrink-0">
-                    {mission.status !== "pending" && (
-                      <span className="text-[10px] sm:text-xs font-bold text-neon-blue bg-neon-blue/10 px-2 py-1 rounded">
-                        +{mission.xpAwarded} XP
-                      </span>
-                    )}
-                    <ChevronRight className="w-4 h-4 text-gray-700 group-hover:text-neon-blue transition-colors" />
-                  </div>
-                </motion.div>
+            <select 
+              disabled={profile.role !== "master"}
+              value={selectedFranquia}
+              onChange={(e) => setSelectedFranquia(e.target.value)}
+              className="bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-neon-blue transition-all w-full sm:w-auto min-w-[200px]"
+            >
+              {profile.role === "master" && <option value="all" className="bg-cockpit-bg">Todas as Unidades</option>}
+              {franquias.map(f => (
+                <option key={f.id} value={f.id} className="bg-cockpit-bg">{f.nome}</option>
               ))}
-              {missions.length === 0 && (
-                <p className="text-center text-gray-600 py-8 italic">Nenhuma missão enviada ainda. Inicie sua jornada!</p>
-              )}
-            </div>
+            </select>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4 w-full md:w-auto">
+            <button 
+              onClick={() => setShowAddUser(true)}
+              className="flex-1 sm:flex-none bg-mult-orange hover:bg-mult-orange/90 text-white font-bold py-3 px-4 sm:px-6 rounded-xl transition-all text-[10px] sm:text-xs uppercase tracking-widest flex items-center justify-center gap-2 neon-glow-orange"
+            >
+              <UserPlus className="w-4 h-4" /> Novo Usuário
+            </button>
+            {profile.role === "master" && (
+              <button 
+                onClick={() => setShowImportModal(true)}
+                className="flex-1 sm:flex-none bg-neon-blue/20 hover:bg-neon-blue/30 text-neon-blue border border-neon-blue/30 font-bold py-3 px-4 sm:px-6 rounded-xl transition-all text-[10px] sm:text-xs uppercase tracking-widest flex items-center justify-center gap-2"
+              >
+                <Upload className="w-4 h-4" /> Importar <span className="hidden sm:inline">Alunos (CSV)</span>
+              </button>
+            )}
           </div>
         </div>
-      </div>
-      ) : (
-        <AnimatePresence mode="wait">
-          {!profile.atsTermsAccepted ? (
-            <motion.div 
-              key="terms"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="max-w-2xl mx-auto glass-card p-8 space-y-6 border-mult-orange/30"
+
+        {activeTab === "users" ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+            <button 
+              onClick={() => { setRoleFilter("aluno"); }}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all text-left",
+                roleFilter === "aluno" ? "border-neon-blue bg-neon-blue/10" : "hover:bg-white/5"
+              )}
             >
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-12 h-12 rounded-full bg-mult-orange/20 flex items-center justify-center text-mult-orange neon-glow-orange border border-mult-orange/30">
-                  <FileText className="w-6 h-6" />
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue neon-glow-blue border border-neon-blue/20">
+                <Users className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Alunos</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.users.aluno}</p>
+              </div>
+            </button>
+
+            <button 
+              onClick={() => { setRoleFilter("professor"); }}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all text-left",
+                roleFilter === "professor" ? "border-mult-orange bg-mult-orange/10" : "hover:bg-white/5"
+              )}
+            >
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-mult-orange/20 flex items-center justify-center text-mult-orange neon-glow-orange border border-mult-orange/20">
+                <Rocket className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Professores</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.users.professor}</p>
+              </div>
+            </button>
+
+            <button 
+              onClick={() => { setRoleFilter("coordenador"); }}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all text-left",
+                roleFilter === "coordenador" ? "border-purple-500 bg-purple-500/10" : "hover:bg-white/5"
+              )}
+            >
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-purple-500/20 flex items-center justify-center text-purple-400 neon-glow-purple border border-purple-500/20">
+                <Building2 className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Coordenadores</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.users.coordenador}</p>
+              </div>
+            </button>
+
+            <button 
+              onClick={() => { setRoleFilter("rh"); }}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all text-left",
+                roleFilter === "rh" ? "border-pink-500 bg-pink-500/10" : "hover:bg-white/5"
+              )}
+            >
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-pink-500/20 flex items-center justify-center text-pink-400 neon-glow-pink border border-pink-500/20">
+                <Users className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">RH</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.users.rh}</p>
+              </div>
+            </button>
+
+            <button 
+              onClick={() => { setRoleFilter("all"); }}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all text-left",
+                roleFilter === "all" ? "border-white bg-white/5" : "hover:bg-white/5"
+              )}
+            >
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-white/5 flex items-center justify-center text-white border border-white/10">
+                <Users className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Total Geral</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.users.total}</p>
+              </div>
+            </button>
+          </div>
+        ) : activeTab === "activities" ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+            <div className="glass-card p-5 sm:p-6 flex items-center gap-4">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-neon-blue/20 flex items-center justify-center text-neon-blue border border-neon-blue/20">
+                <FileText className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Total Missões</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.missions.total}</p>
+              </div>
+            </div>
+
+            <button 
+              onClick={() => setActivityStatusFilter("pending")}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all text-left",
+                activityStatusFilter === "pending" ? "border-yellow-500 bg-yellow-500/10" : "hover:bg-white/5"
+              )}
+            >
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-yellow-500/20 flex items-center justify-center text-yellow-400 border border-yellow-500/20">
+                <Clock className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Pendentes</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.missions.pending}</p>
+              </div>
+            </button>
+
+            <button 
+              onClick={() => setActivityStatusFilter("approved")}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all text-left",
+                activityStatusFilter === "approved" ? "border-green-500 bg-green-500/10" : "hover:bg-white/5"
+              )}
+            >
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-green-500/20 flex items-center justify-center text-green-400 border border-green-500/20">
+                <CheckCircle2 className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Aprovadas</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.missions.approved}</p>
+              </div>
+            </button>
+
+            <button 
+              onClick={() => setActivityStatusFilter("bonus")}
+              className={cn(
+                "glass-card p-5 sm:p-6 flex items-center gap-4 transition-all text-left",
+                activityStatusFilter === "bonus" ? "border-purple-500 bg-purple-500/10" : "hover:bg-white/5"
+              )}
+            >
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-purple-500/20 flex items-center justify-center text-purple-400 border border-purple-500/20">
+                <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Bônus</p>
+                <p className="text-xl sm:text-2xl font-black">{counts.missions.bonus}</p>
+              </div>
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {activeTab === "ats" ? (
+        <AtsDashboard profile={profile} />
+      ) : activeTab === "users" ? (
+        <div className="glass-card overflow-hidden">
+          <div className="p-6 border-b border-white/5 bg-white/5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
+              <h3 className="text-sm font-black uppercase tracking-widest text-gray-400 flex items-center gap-2">
+                Relatório de Desempenho (Supabase)
+              </h3>
+              <div className="flex gap-2">
+                <select 
+                  value={roleFilter}
+                  onChange={(e) => { setRoleFilter(e.target.value); setTurmaFilter("all"); }}
+                  className="bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-widest focus:outline-none focus:border-neon-blue transition-all"
+                >
+                  <option value="all">Todos os Cargos</option>
+                  <option value="aluno">Alunos</option>
+                  <option value="professor">Professores</option>
+                  <option value="coordenador">Coordenadores</option>
+                  <option value="rh">Estagiária de RH</option>
+                </select>
+                {roleFilter === "aluno" && (
+                  <select 
+                    value={turmaFilter}
+                    onChange={(e) => setTurmaFilter(e.target.value)}
+                    className="bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-widest focus:outline-none focus:border-neon-blue transition-all"
+                  >
+                    <option value="all">Todas as Turmas</option>
+                    {turmas.map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+              <input 
+                type="text"
+                placeholder="Buscar por nome ou código..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 bg-black/20 border border-white/10 rounded-lg text-xs focus:outline-none focus:border-neon-blue transition-all"
+              />
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="hidden md:table w-full text-left border-collapse min-w-[600px]">
+              <thead>
+                <tr className="text-[10px] font-black text-gray-500 uppercase tracking-widest border-b border-white/5">
+                  <th className="px-4 sm:px-6 py-4">Usuário</th>
+                  <th className="px-4 sm:px-6 py-4">Cargo</th>
+                  <th className="px-4 sm:px-6 py-4">Unidade</th>
+                  <th className="px-4 sm:px-6 py-4">Nível / XP</th>
+                  <th className="px-4 sm:px-6 py-4 text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {users.map((userItem) => {
+                  const rank = RANKS.reduce((prev, curr) => (userItem.xp >= curr.minXP ? curr : prev), RANKS[0]);
+                  return (
+                    <tr key={userItem.id} className="hover:bg-white/5 transition-colors group">
+                      <td className="px-4 sm:px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-white/5 flex items-center justify-center text-gray-500 group-hover:text-neon-blue transition-colors shrink-0">
+                            <Users className="w-4 h-4 sm:w-5 sm:h-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-bold text-xs sm:text-sm truncate">{userItem.displayName}</p>
+                            <div className="flex flex-col gap-0.5">
+                              <p className="text-[9px] sm:text-[10px] text-gray-400 font-mono truncate">{userItem.email}</p>
+                              {userItem.codigo && (
+                                <p className="text-[8px] sm:text-[9px] text-mult-orange font-black uppercase tracking-widest">MAT: {userItem.codigo}</p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 sm:px-6 py-4 shrink-0">
+                        <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-widest bg-white/5 px-2 py-1 rounded border border-white/10">
+                          {ROLES_LABELS[userItem.role]}
+                        </span>
+                      </td>
+                      <td className="px-4 sm:px-6 py-4 shrink-0">
+                        <span className="text-[10px] sm:text-xs font-bold text-gray-400">
+                          {franquias.find(f => f.id === userItem.franquiaId)?.nome || userItem.franquiaId || "Global"}
+                        </span>
+                      </td>
+                      <td className="px-4 sm:px-6 py-4 shrink-0">
+                        <div className="space-y-1">
+                          <p className={`text-[9px] sm:text-[10px] font-black uppercase tracking-widest ${rank.color}`}>{rank.name}</p>
+                          <p className="text-[10px] sm:text-xs font-bold text-gray-500">{userItem.xp} XP</p>
+                        </div>
+                      </td>
+                      <td className="px-4 sm:px-6 py-4 text-right shrink-0">
+                        <div className="flex justify-end gap-2">
+                          {userItem.role === "aluno" && (
+                            <button 
+                              onClick={() => setShowMissionHistory(userItem)}
+                              className="p-1.5 sm:p-2 rounded-lg bg-white/5 hover:bg-neon-blue/20 hover:text-neon-blue transition-all text-gray-600"
+                              title="Ver Histórico de Missões"
+                            >
+                              <Eye className="w-3.5 h-3.5 sm:w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {hasMore && (
+            <div className="p-6 border-t border-white/5 bg-white/5 flex justify-center">
+              <button 
+                onClick={() => fetchUsers(false)}
+                disabled={loading}
+                className="px-8 py-3 rounded-xl bg-neon-blue text-black font-black uppercase tracking-widest text-xs neon-glow-blue disabled:opacity-50 transition-all flex items-center gap-2"
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Carregar Mais Usuários"}
+              </button>
+            </div>
+          )}
+        </div>
+      ) : activeTab === "activities" ? (
+        <div className="glass-card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[800px]">
+              <thead>
+                <tr className="text-[10px] font-black text-gray-500 uppercase tracking-widest border-b border-white/5">
+                  <th className="px-6 py-4">Aluno</th>
+                  <th className="px-6 py-4">Atividade</th>
+                  <th className="px-6 py-4">Data</th>
+                  <th className="px-6 py-4">Status</th>
+                  <th className="px-6 py-4">XP</th>
+                  <th className="px-6 py-4">Unidade</th>
+                  <th className="px-6 py-4 text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {allMissions.map((mission) => (
+                  <tr key={mission.id} className="hover:bg-white/5 transition-colors group">
+                    <td className="px-6 py-4">
+                      <p className="font-bold text-xs sm:text-sm">{mission.studentName}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="text-xs font-medium text-gray-300">{getRelativeLesson(mission.classNum).label}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="text-[10px] font-mono text-gray-500">
+                        {mission.createdAt ? new Date(mission.createdAt).toLocaleDateString("pt-BR") : "N/A"}
+                      </p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={cn(
+                        "text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded border",
+                        mission.status === "approved" ? "bg-green-500/10 text-green-400 border-green-500/20" :
+                        mission.status === "pending" ? "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" :
+                        mission.status === "bonus" ? "bg-purple-500/10 text-purple-400 border-purple-500/20" :
+                        "bg-red-500/10 text-red-400 border-red-500/20"
+                      )}>
+                        {mission.status === "approved" ? "Aprovado" : 
+                         mission.status === "pending" ? "Pendente" : 
+                         mission.status === "bonus" ? "Bônus" : "Rejeitado"}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="text-xs font-bold text-neon-blue">+{mission.xpAwarded || 0} XP</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                        {franquias.find(f => f.id === mission.franquiaId)?.nome || mission.franquiaId || "N/A"}
+                      </p>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <button 
+                        onClick={() => setSelectedMissionForView(mission)}
+                        className="p-2 rounded-lg bg-white/5 hover:bg-neon-blue hover:text-black transition-all border border-white/10"
+                        title="Visualizar Missão"
+                      >
+                        <Search className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {hasMoreMissions && (
+            <div className="p-6 border-t border-white/5 bg-white/5 flex justify-center">
+              <button 
+                onClick={() => fetchMissions(false)}
+                disabled={loading}
+                className="px-8 py-3 rounded-xl bg-mult-orange text-white font-black uppercase tracking-widest text-xs neon-glow-orange disabled:opacity-50 transition-all flex items-center gap-2"
+              >
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Carregar Mais Atividades"}
+              </button>
+            </div>
+          )}
+        </div>
+      ) : activeTab === "courses" ? (
+        <CourseManager courses={courses} />
+      ) : activeTab === "maintenance" ? (
+        <div className="space-y-8">
+          <div className="glass-card p-8 border-neon-blue/20 bg-neon-blue/5">
+            <div className="flex items-start gap-6">
+              <div className="w-16 h-16 rounded-2xl bg-neon-blue/20 flex items-center justify-center text-neon-blue shrink-0 border border-neon-blue/30">
+                <Upload className="w-8 h-8" />
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Sincronização / Carga Supabase</h2>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Selecione o arquivo JSON de backup para popular ou sincronizar todas as tabelas do PostgreSQL no Supabase.
+                  </p>
                 </div>
-                <h2 className="text-xl font-black tracking-tighter uppercase">Termos e Normas de Encaminhamento</h2>
+                
+                <div className="pt-4 flex items-center gap-4">
+                  <input
+                    type="file"
+                    accept=".json"
+                    id="supabase-backup-upload"
+                    className="hidden"
+                    onChange={handleUploadBackupToSupabase}
+                    disabled={importingToSupabase}
+                  />
+                  <label
+                    htmlFor="supabase-backup-upload"
+                    className="cursor-pointer bg-neon-blue hover:bg-neon-blue/80 text-black font-black py-4 px-8 rounded-xl transition-all neon-glow-blue text-xs uppercase tracking-widest flex items-center gap-3"
+                  >
+                    {importingToSupabase ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <Upload className="w-5 h-5" />
+                    )}
+                    {importingToSupabase ? "Processando..." : "Sincronizar Arquivo JSON"}
+                  </label>
+                </div>
+
+                {supabaseImportReport && (
+                  <div className="p-4 bg-black/60 rounded-xl border border-white/5 space-y-2 mt-4 text-xs font-mono">
+                    <p className="text-green-400 font-bold">Relatório de Carga:</p>
+                    <p>Franquias: {supabaseImportReport.franquias?.inserted}/{supabaseImportReport.franquias?.total}</p>
+                    <p>Usuários: {supabaseImportReport.users?.inserted}/{supabaseImportReport.users?.total}</p>
+                    <p>Missões: {supabaseImportReport.missions?.inserted}/{supabaseImportReport.missions?.total}</p>
+                    <p>Empresas: {supabaseImportReport.companies?.inserted}/{supabaseImportReport.companies?.total}</p>
+                    <p>Vagas: {supabaseImportReport.vagas?.inserted}/{supabaseImportReport.vagas?.total}</p>
+                    <p>Candidaturas: {supabaseImportReport.applications?.inserted}/{supabaseImportReport.applications?.total}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Módulo de Correção de XP (Global) */}
+          <div className="glass-card p-8 border-mult-orange/20 bg-mult-orange/5">
+            <div className="flex items-start gap-6">
+              <div className="w-16 h-16 rounded-2xl bg-mult-orange/20 flex items-center justify-center text-mult-orange shrink-0 border border-mult-orange/30">
+                <RefreshCw className="w-8 h-8" />
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Recálculo Global de XP</h2>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Varre o banco de dados e recalcula o saldo total de XP de todos os alunos com base nas missões que constam como Aprovadas ou Bônus no histórico. Ideal para corrigir dessincronizações pós-migração.
+                  </p>
+                </div>
+                
+                <div className="pt-4">
+                  <button 
+                    onClick={handleGlobalXPSync}
+                    disabled={loading}
+                    className="bg-mult-orange hover:bg-mult-orange/80 text-white font-black py-4 px-8 rounded-xl transition-all neon-glow-orange text-xs uppercase tracking-widest flex items-center gap-3 disabled:opacity-50"
+                  >
+                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-5 h-5" />}
+                    Sincronizar XP de Todos os Alunos
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      ) : null}
+
+      <AnimatePresence>
+        {showAddUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="glass-card w-full max-w-lg p-8 space-y-6 relative"
+            >
+              <button onClick={() => setShowAddUser(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors">
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+              
+              <h2 className="text-2xl font-black tracking-tighter flex items-center gap-3">
+                <UserPlus className="text-mult-orange w-6 h-6" /> CADASTRAR <span className="text-neon-blue">USUÁRIO</span>
+              </h2>
+
+              <form onSubmit={handleCreateUser} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Nome Completo</label>
+                  <input 
+                    required
+                    value={newUser.nome}
+                    onChange={e => setNewUser({...newUser, nome: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                    placeholder="Nome do usuário"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">E-mail</label>
+                    <input 
+                      type="email"
+                      value={newUser.email}
+                      onChange={e => setNewUser({...newUser, email: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                      placeholder="seu@email.com"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Matrícula / Código</label>
+                    <input 
+                      value={newUser.codigo}
+                      onChange={e => setNewUser({...newUser, codigo: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                      placeholder="Ex: 12345"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Senha Temporária</label>
+                    <input 
+                      required
+                      type="password"
+                      value={newUser.senha}
+                      onChange={e => setNewUser({...newUser, senha: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                      placeholder="Mínimo 6 caracteres"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Cargo (Role)</label>
+                    <select 
+                      value={newUser.role}
+                      onChange={e => setNewUser({...newUser, role: e.target.value as any})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                    >
+                      {profile.role === "master" && <option value="master" className="bg-cockpit-bg">Master</option>}
+                      <option value="coordenador" className="bg-cockpit-bg">Coordenador</option>
+                      <option value="professor" className="bg-cockpit-bg">Professor</option>
+                      <option value="rh" className="bg-cockpit-bg">Estagiária de RH</option>
+                      <option value="aluno" className="bg-cockpit-bg">Aluno</option>
+                    </select>
+                  </div>
+                </div>
+
+                {newUser.role === "aluno" && (
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Turma (ex: 024inf)</label>
+                    <input 
+                      value={newUser.turma}
+                      onChange={e => setNewUser({...newUser, turma: e.target.value})}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                      placeholder="Código da turma"
+                    />
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Franquia / Unidade</label>
+                  <select 
+                    disabled={profile.role !== "master"}
+                    value={newUser.franquiaId}
+                    onChange={e => setNewUser({...newUser, franquiaId: e.target.value})}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
+                  >
+                    <option value="" className="bg-cockpit-bg">Selecione uma unidade</option>
+                    {franquias.map(f => (
+                      <option key={f.id} value={f.id} className="bg-cockpit-bg">{f.nome}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {successMsg && (
+                  <div className="p-3 bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-bold rounded-lg flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4" /> {successMsg}
+                  </div>
+                )}
+
+                <button 
+                  disabled={loading}
+                  className="w-full bg-neon-blue text-black font-black py-4 rounded-xl transition-all neon-glow-blue disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
+                >
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "CRIAR USUÁRIO"}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {showImportModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="glass-card w-full max-w-2xl p-8 space-y-6 relative"
+            >
+              <button onClick={() => setShowImportModal(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors">
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+              
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black tracking-tighter flex items-center gap-3">
+                  <Upload className="text-mult-orange w-6 h-6" /> IMPORTAR <span className="text-neon-blue">ALUNOS (CSV)</span>
+                </h2>
+                <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">
+                  Cole os dados abaixo no formato CSV com cabeçalho para processamento em lotes por turma.
+                </p>
               </div>
 
-              <div className="bg-black/40 border border-white/10 rounded-xl p-6 h-64 overflow-y-auto custom-scrollbar text-sm text-gray-400 leading-relaxed space-y-4">
-                <p className="font-bold text-white">DECLARAÇÃO DE CONHECIMENTO DAS NORMAS DE ENCAMINHAMENTO.</p>
-                <p>Declaro para devidos fins de direito ter plena ciência das leis referentes aos serviços de Encaminhamentos exercidos pela MULT Profissões:</p>
-                <p>1º O(a) aluno(a) que for encaminhado e faltar sem justificativa prévia perderá o direito de ser encaminhado novamente.</p>
-                <p>2º O(a) aluno(a) que participar de todo o processo seletivo, concordar com as exigências e no momento da contratação desistir da vaga, perderá o direito de ser encaminhado novamente.</p>
-                <p>3º É direito do aluno ser encaminhado, mas a Agência não garante a contratação.</p>
-                <p>4º O aluno pode se negar a concorrer à vaga ao ouvir as exigências.</p>
-                <p>5º Não é de responsabilidade da MULT Profissões os vínculos empregatícios (assinatura de carteira, etc) entre alunos e empresas parceiras.</p>
-                <p>6º Após contratação, o aluno deve informar à Agência para atualização de status.</p>
+              <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2">
+                <p className="text-[10px] font-black text-mult-orange uppercase tracking-widest flex items-center gap-2">
+                  <AlertCircle className="w-3 h-3" /> Formato Recomendado (Ponto e Vírgula):
+                </p>
+                <code className="text-[10px] text-gray-400 block bg-black/40 p-2 rounded font-mono">
+                  Nome Completo;Código;Unidade;Senha Temporária;Turma<br/>
+                  João Silva;12345;rio-verde;senha123;024inf<br/>
+                  Maria Souza;67890;rio-verde;senha456;024inf
+                </code>
               </div>
 
               <div className="space-y-4">
-                <label className="flex items-center gap-3 cursor-pointer group">
-                  <div className="relative flex items-center">
-                    <input 
-                      type="checkbox" 
-                      checked={acceptTerms}
-                      onChange={(e) => setAcceptTerms(e.target.checked)}
-                      className="w-5 h-5 rounded border-gray-700 bg-gray-800 text-mult-orange focus:ring-mult-orange transition-all"
-                    />
-                  </div>
-                  <span className="text-xs font-bold text-gray-400 group-hover:text-gray-200 transition-colors uppercase tracking-widest">Li e concordo com os termos</span>
-                </label>
-
-                <button 
-                  onClick={handleAcceptTerms}
-                  disabled={!acceptTerms || loadingTerms}
-                  className="w-full bg-mult-orange text-white font-black py-4 rounded-xl transition-all neon-glow-orange uppercase tracking-widest text-xs disabled:opacity-30 disabled:grayscale"
-                >
-                  {loadingTerms ? "PROCESSANDO..." : "ACEITAR TERMOS E ACESSAR AGÊNCIA"}
-                </button>
-              </div>
-            </motion.div>
-          ) : (
-            <motion.div 
-              key="ats-content"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="grid grid-cols-1 lg:grid-cols-3 gap-8"
-            >
-              {/* ATS Profile Section */}
-              <div className="space-y-8">
-                <motion.div 
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className="glass-card p-6"
-                >
-                  <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-6 flex items-center gap-2">
-                    <UserIcon className="w-4 h-4 text-neon-blue" /> Meu Perfil Profissional
-                  </h3>
-
-                  {profile.availabilityStatus && (
-                    <div className={cn(
-                      "mb-6 p-4 rounded-xl border flex items-center justify-between",
-                      profile.availabilityStatus === 'Disponível' ? "bg-green-500/10 border-green-500/30 text-green-400" :
-                      profile.availabilityStatus === 'Bloqueado' ? "bg-red-500/10 border-red-500/30 text-red-400" :
-                      "bg-neon-blue/10 border-neon-blue/30 text-neon-blue"
-                    )}>
-                      <div className="flex items-center gap-3">
-                        <div className={cn(
-                          "w-8 h-8 rounded-lg flex items-center justify-center",
-                          profile.availabilityStatus === 'Disponível' ? "bg-green-500/20" :
-                          profile.availabilityStatus === 'Bloqueado' ? "bg-red-500/20" :
-                          "bg-neon-blue/20"
-                        )}>
-                          <Zap className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-widest opacity-70">Status de Disponibilidade</p>
-                          <p className="text-sm font-black uppercase tracking-tighter">{profile.availabilityStatus}</p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  
-                  <form onSubmit={handleProfileUpdate} className="space-y-6">
-                    <div className="space-y-4">
-                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Minhas Habilidades</label>
-                      <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto custom-scrollbar pr-2">
-                        {SKILLS.map(skill => (
-                          <label key={skill} className="flex items-center gap-3 p-2 rounded-lg bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-colors">
-                            <input 
-                              type="checkbox"
-                              checked={selectedSkills.includes(skill)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedSkills([...selectedSkills, skill]);
-                                } else {
-                                  setSelectedSkills(selectedSkills.filter(s => s !== skill));
-                                }
-                              }}
-                              className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-neon-blue focus:ring-neon-blue"
-                            />
-                            <span className="text-xs text-gray-300">{skill}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Currículo (PDF)</label>
-                      <div className="relative">
-                        <input 
-                          type="file"
-                          accept=".pdf"
-                          onChange={(e) => setResumeFile(e.target.files?.[0] || null)}
-                          className="hidden"
-                          id="resume-upload"
-                        />
-                        <label 
-                          htmlFor="resume-upload"
-                          className="flex items-center justify-center gap-2 w-full p-4 rounded-xl border-2 border-dashed border-white/10 hover:border-neon-blue/50 hover:bg-neon-blue/5 transition-all cursor-pointer group"
-                        >
-                          <FileText className="w-5 h-5 text-gray-500 group-hover:text-neon-blue" />
-                          <span className="text-xs font-bold text-gray-400 group-hover:text-gray-200">
-                            {resumeFile ? resumeFile.name : profile.resumeUrl ? "Alterar Currículo" : "Upload Currículo (PDF)"}
-                          </span>
-                        </label>
-                      </div>
-                      {profile.resumeUrl && (
-                        <a 
-                          href={profile.resumeUrl} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="text-[10px] text-neon-blue hover:underline block text-center mt-2"
-                        >
-                          Ver currículo atual
-                        </a>
-                      )}
-                    </div>
-
-                    <button 
-                      type="submit"
-                      disabled={uploadingProfile}
-                      className="w-full bg-neon-blue text-white font-black py-3 rounded-xl transition-all neon-glow-blue uppercase tracking-widest text-xs disabled:opacity-50"
-                    >
-                      {uploadingProfile ? "SALVANDO..." : "ATUALIZAR PERFIL"}
-                    </button>
-                  </form>
-                </motion.div>
-              </div>
-
-              {/* Job Board Section */}
-              <div className="lg:col-span-2 space-y-6">
-                <h3 className="text-sm font-bold uppercase tracking-widest text-gray-400 flex items-center gap-2">
-                  <Briefcase className="w-4 h-4 text-mult-orange" /> Mural de Vagas
-                </h3>
-
-                <div className="grid grid-cols-1 gap-4">
-                  {jobs.map(job => (
-                    <motion.div 
-                      key={job.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="glass-card p-6 relative group border-white/10 hover:border-mult-orange/30 transition-all"
-                    >
-                      <div className="flex justify-between items-start mb-4">
-                        <div>
-                          <h4 className="text-lg font-black tracking-tighter text-white uppercase">{job.title}</h4>
-                          <p className="text-xs font-bold text-mult-orange uppercase tracking-widest">{job.companyName || "Empresa"}</p>
-                        </div>
-                        {hasApplied(job.id) && (
-                          <span className="bg-green-500/10 text-green-500 text-[10px] font-black px-2 py-1 rounded-full border border-green-500/20 uppercase tracking-widest">
-                            Candidatado
-                          </span>
-                        )}
-                      </div>
-
-                      <p className="text-sm text-gray-400 mb-6 line-clamp-3 italic">"{job.description}"</p>
-
-                      <div className="flex flex-wrap gap-2 mb-6">
-                        {job.requiredSkills.map(skill => (
-                          <span 
-                            key={skill}
-                            className={cn(
-                              "text-[9px] font-black px-2 py-1 rounded-md uppercase tracking-widest border",
-                              selectedSkills.includes(skill) 
-                                ? "bg-neon-blue/10 text-neon-blue border-neon-blue/20" 
-                                : "bg-white/5 text-gray-500 border-white/10"
-                            )}
-                          >
-                            {skill}
-                          </span>
-                        ))}
-                      </div>
-
-                      <button 
-                        onClick={() => handleApply(job)}
-                        disabled={hasApplied(job.id) || applyingJobId === job.id}
-                        className={cn(
-                          "w-full py-3 rounded-xl font-black uppercase tracking-widest text-xs transition-all",
-                          hasApplied(job.id)
-                            ? "bg-white/5 text-gray-600 cursor-not-allowed"
-                            : "bg-gradient-to-r from-mult-orange to-orange-600 text-white neon-glow-orange hover:scale-[1.02] active:scale-95"
-                        )}
-                      >
-                        {applyingJobId === job.id ? "PROCESSANDO..." : hasApplied(job.id) ? "CANDIDATURA ENVIADA" : "CANDIDATAR-ME"}
-                      </button>
-                    </motion.div>
-                  ))}
-                  {jobs.length === 0 && (
-                    <div className="glass-card p-12 text-center">
-                      <p className="text-gray-500 italic">Nenhuma vaga disponível no momento. Volte em breve!</p>
-                    </div>
-                  )}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
+                    <Target className="w-3 h-3" /> Selecionar Curso Vinculado:
+                  </label>
+                  <select 
+                    value={selectedCourseId}
+                    onChange={(e) => setSelectedCourseId(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm focus:outline-none focus:border-neon-blue transition-all"
+                  >
+                    {courses.map(course => (
+                      <option key={course.id} value={course.id} className="bg-cockpit-bg">
+                        {course.title}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      )}
 
-      {/* Mission Detail Modal */}
-      <AnimatePresence>
-        {selectedMission && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="glass-card w-full max-w-2xl overflow-hidden relative"
-            >
-              {/* Modal Header */}
-              <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
-                <div>
-                  <h2 className="text-xl font-black tracking-tighter uppercase">DIÁRIO DE <span className="text-mult-orange">BORDO</span></h2>
-                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mt-1">
-                    {getRelativeLesson(selectedMission.classNum).label}
-                  </p>
-                </div>
+                <textarea 
+                  value={importText}
+                  onChange={e => { setImportText(e.target.value); setImportPreview([]); }}
+                  placeholder="Cole aqui o conteúdo do seu CSV..."
+                  className="w-full h-40 bg-white/5 border border-white/10 rounded-xl p-4 text-sm font-mono focus:outline-none focus:border-neon-blue transition-all"
+                />
+                
                 <button 
-                  onClick={() => setSelectedMission(null)}
-                  className="p-2 rounded-full hover:bg-white/10 transition-colors text-gray-400"
+                  onClick={handlePreviewImport}
+                  className="w-full py-2 bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase tracking-widest rounded-lg border border-white/10 transition-all"
                 >
-                  <LogOut className="w-5 h-5 rotate-180" />
+                  PRÉ-VISUALIZAR DADOS
                 </button>
               </div>
 
-              {/* Modal Content */}
-              <div className="p-8 space-y-6 max-h-[70vh] overflow-y-auto custom-scrollbar">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-mult-orange/20 flex items-center justify-center text-mult-orange neon-glow-orange">
-                      <Clock className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Data da Missão</p>
-                      <p className="text-sm font-bold">{new Date(selectedMission.createdAt).toLocaleString('pt-BR')}</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Status</p>
-                    <div className={cn(
-                      "text-xs font-black uppercase tracking-widest px-3 py-1 rounded-full border mt-1",
-                      selectedMission.status === 'approved' || selectedMission.status === 'bonus' 
-                        ? "bg-neon-blue/10 text-neon-blue border-neon-blue/20" 
-                        : "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
-                    )}>
-                      {selectedMission.status === 'approved' ? 'Aprovada' : selectedMission.status === 'bonus' ? 'Bônus' : 'Pendente'}
-                    </div>
-                  </div>
+              {importPreview.length > 0 && (
+                <div className="max-h-40 overflow-y-auto border border-white/10 rounded-xl bg-black/20">
+                  <table className="w-full text-[10px] text-left">
+                    <thead className="bg-white/5 sticky top-0">
+                      <tr>
+                        <th className="p-2 border-b border-white/10">Nome</th>
+                        <th className="p-2 border-b border-white/10">Código</th>
+                        <th className="p-2 border-b border-white/10">Unidade</th>
+                        <th className="p-2 border-b border-white/10">Turma</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importPreview.slice(0, 10).map((row, idx) => (
+                        <tr key={idx} className="border-b border-white/5">
+                          <td className="p-2">{row["Nome Completo"] || row["nome"]}</td>
+                          <td className="p-2">{row["Código"] || row["codigo"] || row["Matrícula"] || row["matricula"]}</td>
+                          <td className="p-2">{row["Unidade"] || row["unidade"]}</td>
+                          <td className="p-2">{row["Turma"] || row["turma"]}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
+              )}
 
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 text-gray-400">
-                    <FileText className="w-4 h-4" />
-                    <span className="text-[10px] font-black uppercase tracking-widest">Relato da Missão</span>
-                  </div>
-                  <div className="bg-white/5 rounded-2xl p-6 border border-white/10 min-h-[200px]">
-                    <p className="text-gray-300 leading-relaxed whitespace-pre-wrap italic">
-                      "{selectedMission.content}"
-                    </p>
-                  </div>
+              {successMsg && (
+                <div className="p-3 bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-bold rounded-lg flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4" /> {successMsg}
                 </div>
+              )}
 
-                {selectedMission.xpAwarded && (
-                  <div className="flex items-center gap-4 p-4 bg-neon-blue/10 rounded-xl border border-neon-blue/20">
-                    <div className="w-10 h-10 rounded-lg bg-neon-blue/20 flex items-center justify-center text-neon-blue neon-glow-blue">
-                      <Zap className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">XP Conquistado</p>
-                      <p className="text-lg font-black text-neon-blue">+{selectedMission.xpAwarded} XP</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Modal Footer */}
-              <div className="p-6 border-t border-white/10 bg-white/5 flex justify-end">
+              <div className="flex gap-4">
                 <button 
-                  onClick={() => setSelectedMission(null)}
-                  className="px-8 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-black uppercase tracking-widest text-xs transition-all"
+                  onClick={() => setShowImportModal(false)}
+                  className="flex-1 bg-white/5 hover:bg-white/10 text-white font-bold py-4 rounded-xl transition-all uppercase tracking-widest text-xs"
                 >
-                  Fechar
+                  CANCELAR
+                </button>
+                <button 
+                  disabled={loading || !importText.trim()}
+                  onClick={handleImportStudents}
+                  className="flex-1 bg-neon-blue text-black font-black py-4 rounded-xl transition-all neon-glow-blue disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
+                >
+                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "INICIAR IMPORTAÇÃO"}
                 </button>
               </div>
             </motion.div>
           </div>
         )}
+
+        {/* MODAL 1: REVISAR MISSÃO E DAR XP (DA LUPA) */}
+        {selectedMissionForView && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="glass-card w-full max-w-2xl p-6 sm:p-8 space-y-6 relative"
+            >
+              <button 
+                onClick={() => setSelectedMissionForView(null)} 
+                className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
+              >
+                <XCircle className="w-6 h-6" />
+              </button>
+              
+              <div className="space-y-4 pr-8">
+                <h2 className="text-xl sm:text-2xl font-black tracking-tighter flex items-center gap-3 uppercase">
+                  <Search className="text-neon-blue w-6 h-6 shrink-0" /> REVISAR <span className="text-mult-orange">MISSÃO</span>
+                </h2>
+                
+                {/* Cabeçalho do Aluno com Botão para Histórico */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+                  <p className="text-[10px] sm:text-xs text-gray-500 font-bold uppercase tracking-widest leading-relaxed">
+                    Aluno: <span className="text-white">{selectedMissionForView.studentName}</span> <br/>
+                    Atividade: <span className="text-white">{getRelativeLesson(selectedMissionForView.classNum).label}</span>
+                  </p>
+                  
+                  <button
+                    onClick={() => setShowMissionHistory({
+                      id: selectedMissionForView.studentId,
+                      uid: selectedMissionForView.studentId,
+                      displayName: selectedMissionForView.studentName,
+                      turma: selectedMissionForView.turma,
+                      role: "aluno"
+                    } as UserProfile)}
+                    className="bg-white/5 hover:bg-white/10 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-white/10 shrink-0"
+                  >
+                    <Clock className="w-3 h-3" /> Ver Diário Antigo
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-black/40 border border-white/10 rounded-xl p-5 shadow-inner min-h-[120px] sm:min-h-[150px]">
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                  <FileText className="w-3 h-3" /> Conteúdo Enviado:
+                </p>
+                <p className="text-gray-300 italic whitespace-pre-wrap leading-relaxed text-sm sm:text-base">
+                  "{selectedMissionForView.content}"
+                </p>
+              </div>
+
+              {selectedMissionForView.status === "pending" ? (
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 pt-2">
+                  <button 
+                    disabled={loading}
+                    onClick={() => handleRejectMission(selectedMissionForView)}
+                    className="flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 font-black py-3 sm:py-4 rounded-xl transition-all disabled:opacity-50 uppercase tracking-widest text-[10px] sm:text-xs flex items-center justify-center gap-2"
+                  >
+                    <XCircle className="w-4 h-4 shrink-0" /> REJEITAR
+                  </button>
+                  <button 
+                    disabled={loading}
+                    onClick={() => handleApproveMission(selectedMissionForView, false)}
+                    className="flex-1 bg-green-500/20 hover:bg-green-500/30 text-green-400 border border-green-500/40 font-black py-3 sm:py-4 rounded-xl transition-all disabled:opacity-50 uppercase tracking-widest text-[10px] sm:text-xs flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle className="w-4 h-4 shrink-0" /> APROVAR (+{XP_PER_MISSION} XP)
+                  </button>
+                  <button 
+                    disabled={loading}
+                    onClick={() => handleApproveMission(selectedMissionForView, true)}
+                    className="flex-1 bg-neon-blue hover:bg-neon-blue/90 text-black font-black py-3 sm:py-4 rounded-xl transition-all neon-glow-blue disabled:opacity-50 uppercase tracking-widest text-[10px] sm:text-xs flex items-center justify-center gap-2"
+                  >
+                    <Zap className="w-4 h-4 shrink-0" /> BÔNUS (+{XP_BONUS} XP)
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center p-6 border border-white/10 rounded-xl bg-white/5">
+                  <CheckCircle2 className="w-8 h-8 text-gray-500 mb-2" />
+                  <p className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest text-center">
+                    Esta missão já foi avaliada ({selectedMissionForView.status})
+                  </p>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+
+        {/* MODAL 2: HISTÓRICO DE MISSÕES (DO OLHINHO E DO BOTÃO VER DIÁRIO ANTIGO) */}
+        {showMissionHistory && (
+          <MissionHistoryModal 
+            student={showMissionHistory} 
+            onClose={() => setShowMissionHistory(null)} 
+          />
+        )}
+
       </AnimatePresence>
     </div>
   );
