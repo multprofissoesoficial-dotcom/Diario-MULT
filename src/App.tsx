@@ -18,12 +18,20 @@ export default function App() {
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [showLobby, setShowLobby] = useState(false);
 
+  // 🔥 BLINDAGEM MÁXIMA DE ROTEAMENTO 🔥
+  // Intercepta a leitura do banco de dados. Se o e-mail for da diretoria,
+  // sobrepõe qualquer cargo duplicado ("aluno") e força o acesso como Master.
+  const masterEmails = ["faustodv@gmail.com", "selane@mult.com.br"];
+  const isDirector = profile?.email && masterEmails.includes(profile.email.toLowerCase().trim());
+  const effectiveRole = isDirector ? "master" : profile?.role;
+
   useEffect(() => {
     let isMounted = true;
 
     async function fetchEnrollments() {
-      if (user && profile?.role === "aluno") {
-        const targetId = profile.id;
+      // Usamos a regra blindada (effectiveRole) para não carregar rotinas de aluno no seu perfil
+      if (user && effectiveRole === "aluno") {
+        const targetId = profile!.id;
         
         try {
           const { data, error } = await supabase
@@ -46,9 +54,9 @@ export default function App() {
             
             setEnrollments(list);
 
-            if (list.length > 1 && !profile.currentCourseId) {
+            if (list.length > 1 && !profile!.currentCourseId) {
               setShowLobby(true);
-            } else if (list.length === 1 && !profile.currentCourseId) {
+            } else if (list.length === 1 && !profile!.currentCourseId) {
               await supabase
                 .from("usuarios")
                 .update({ current_course_id: list[0].courseId })
@@ -69,7 +77,7 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, [user, profile?.role, profile?.currentCourseId, profile?.id]);
+  }, [user, effectiveRole, profile?.currentCourseId, profile?.id]);
 
   if (loading) {
     return (
@@ -91,6 +99,9 @@ export default function App() {
     );
   }
 
+  // Cria um perfil seguro garantindo que o AdminDashboard receba a credencial Master
+  const safeProfile = profile ? { ...profile, role: effectiveRole as any } : null;
+
   return (
     <div className="min-h-screen bg-cockpit-bg selection:bg-neon-blue selection:text-black">
       <AnimatePresence mode="wait">
@@ -103,27 +114,27 @@ export default function App() {
           >
             <Auth onSeedClick={() => {}} />
           </motion.div>
-        ) : profile ? (
+        ) : safeProfile ? (
           <motion.div 
             key="dashboard"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            {profile.role === "aluno" ? (
+            {effectiveRole === "aluno" ? (
               showLobby ? (
                 <CourseLobby 
-                  profile={profile} 
+                  profile={safeProfile} 
                   enrollments={enrollments} 
                   onSelect={() => setShowLobby(false)} 
                 />
               ) : (
-                <StudentDashboard profile={profile} />
+                <StudentDashboard profile={safeProfile} />
               )
-            ) : profile.role === "professor" ? (
-              <TeacherDashboard profile={profile} />
+            ) : effectiveRole === "professor" ? (
+              <TeacherDashboard profile={safeProfile} />
             ) : (
-              <AdminDashboard profile={profile} />
+              <AdminDashboard profile={safeProfile} />
             )}
           </motion.div>
         ) : (
