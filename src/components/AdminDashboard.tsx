@@ -1354,6 +1354,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             </motion.div>
           </div>
         )}
+        {/* MODAL 1: REVISAR MISSÃO E DAR XP (DA LUPA) */}
         {selectedMissionForView && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
             <motion.div 
@@ -1369,13 +1370,31 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                 <XCircle className="w-6 h-6" />
               </button>
               
-              <div className="space-y-2 pr-8">
+              <div className="space-y-4 pr-8">
                 <h2 className="text-xl sm:text-2xl font-black tracking-tighter flex items-center gap-3 uppercase">
                   <Search className="text-neon-blue w-6 h-6 shrink-0" /> REVISAR <span className="text-mult-orange">MISSÃO</span>
                 </h2>
-                <p className="text-[10px] sm:text-xs text-gray-500 font-bold uppercase tracking-widest">
-                  Aluno: <span className="text-white">{selectedMissionForView.studentName}</span> | Atividade: <span className="text-white">{getRelativeLesson(selectedMissionForView.classNum).label}</span>
-                </p>
+                
+                {/* Cabeçalho do Aluno com Botão para Histórico */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+                  <p className="text-[10px] sm:text-xs text-gray-500 font-bold uppercase tracking-widest leading-relaxed">
+                    Aluno: <span className="text-white">{selectedMissionForView.studentName}</span> <br/>
+                    Atividade: <span className="text-white">{getRelativeLesson(selectedMissionForView.classNum).label}</span>
+                  </p>
+                  
+                  <button
+                    onClick={() => setShowMissionHistory({
+                      id: selectedMissionForView.studentId,
+                      uid: selectedMissionForView.studentId,
+                      displayName: selectedMissionForView.studentName,
+                      turma: selectedMissionForView.turma,
+                      role: "aluno"
+                    } as UserProfile)}
+                    className="bg-white/5 hover:bg-white/10 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-white/10 shrink-0"
+                  >
+                    <Clock className="w-3 h-3" /> Ver Diário Antigo
+                  </button>
+                </div>
               </div>
 
               <div className="bg-black/40 border border-white/10 rounded-xl p-5 shadow-inner min-h-[120px] sm:min-h-[150px]">
@@ -1422,7 +1441,19 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             </motion.div>
           </div>
         )}
+
+        {/* MODAL 2: HISTÓRICO DE MISSÕES (DO OLHINHO E DO BOTÃO VER DIÁRIO ANTIGO) */}
+        {showMissionHistory && (
+          <MissionHistoryModal 
+            student={showMissionHistory} 
+            onClose={() => setShowMissionHistory(null)} 
+          />
+        )}
+
       </AnimatePresence>
+    </div>
+  );
+}      </AnimatePresence>
     </div>
   );
 }
