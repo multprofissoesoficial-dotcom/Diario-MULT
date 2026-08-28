@@ -566,7 +566,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     
     setLoading(true);
     try {
-      // 1. Busca todos os usuários com paginação para cruzar IDs com UIDs e vencer limite de 1000
+      // 1. Busca todos os usuários com paginação e ORDENAÇÃO para não perder registros
       let allUsers: any[] = [];
       let uPage = 0;
       let uHasMore = true;
@@ -575,6 +575,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         const { data: uData, error: uErr } = await supabase
           .from("usuarios")
           .select("id, uid")
+          .order('id') // Força a ordenação para a paginação não embaralhar os dados
           .range(uPage * 1000, (uPage + 1) * 1000 - 1);
         
         if (uErr) throw uErr;
@@ -592,7 +593,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         if (u.uid) userMap[u.uid] = u.id; // Mapa uid do firebase para id
       });
 
-      // 2. Busca todas as missões aprovadas/bonus com paginação para vencer limite de 1000
+      // 2. Busca todas as missões aprovadas/bonus com paginação e ORDENAÇÃO
       let allMissionsFromDB: any[] = [];
       let mPage = 0;
       let mHasMore = true;
@@ -602,6 +603,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
           .from("missoes")
           .select("student_id, status, xp_awarded")
           .in("status", ["approved", "bonus"])
+          .order('id') // Força a ordenação para não perder nenhuma missão
           .range(mPage * 1000, (mPage + 1) * 1000 - 1);
 
         if (mErr) throw mErr;
@@ -637,8 +639,11 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       }
 
       alert(`Sincronização global concluída! Saldo de XP de ${updates.length} alunos foram recalculados e corrigidos.`);
-      fetchUsers(true); 
+      
+      // Atualiza a tela imediatamente após o recálculo
       fetchCounts();
+      fetchUsers(true); 
+
     } catch (err: any) {
       console.error("Erro ao sincronizar XP:", err);
       alert("Erro ao recalcular XP: " + err.message);
