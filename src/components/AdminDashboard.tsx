@@ -54,8 +54,6 @@ import {
 } from "lucide-react";
 
 export default function AdminDashboard({ profile }: { profile: UserProfile }) {
-  // 🔥 IDENTIFICADOR DE ADMIN GERAL 🔥
-  // Apenas este e-mail tem visão global de todas as unidades. Os demais Masters ficam presos à própria unidade.
   const isGlobalAdmin = profile.email?.toLowerCase().trim() === "faustodv@gmail.com";
 
   const [franquias, setFranquias] = useState<Franquia[]>([]);
@@ -98,6 +96,11 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [backupLoading, setBackupLoading] = useState(false);
   const [importingToSupabase, setImportingToSupabase] = useState(false);
   const [supabaseImportReport, setSupabaseImportReport] = useState<any>(null);
+
+  // States do Módulo Raio-X de Investigação
+  const [xraySearch, setXraySearch] = useState("");
+  const [xrayResults, setXrayResults] = useState<any>(null);
+  const [xrayLoading, setXrayLoading] = useState(false);
 
   const [counts, setCounts] = useState({
     users: { total: 0, aluno: 0, professor: 0, coordenador: 0, rh: 0, pending: 0, active: 0 },
@@ -668,6 +671,20 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
+  const handleXRay = async () => {
+    if (!xraySearch.trim()) return;
+    setXrayLoading(true);
+    try {
+      const { data: usersData } = await supabase.from("usuarios").select("id, uid, codigo, display_name, xp").ilike("display_name", `%${xraySearch}%`);
+      const { data: missionsData } = await supabase.from("missoes").select("module, class_num, student_id, status, xp_awarded").ilike("student_name", `%${xraySearch}%`);
+      setXrayResults({ users: usersData || [], missions: missionsData || [] });
+    } catch (err) {
+      console.error("Erro no Raio-X:", err);
+    } finally {
+      setXrayLoading(false);
+    }
+  };
+
   const totalAlunos = counts.users.aluno;
   const avgXP = totalAlunos > 0 ? Math.round(users.filter(u => u.role === "aluno").reduce((acc, curr) => acc + (curr.xp || 0), 0) / (users.filter(u => u.role === "aluno").length || 1)) : 0;
 
@@ -1228,6 +1245,81 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                     Sincronizar XP de Todos os Alunos
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Raio-X de XP */}
+          <div className="glass-card p-8 border-red-500/20 bg-red-500/5 mt-8">
+            <div className="flex items-start gap-6">
+              <div className="w-16 h-16 rounded-2xl bg-red-500/20 flex items-center justify-center text-red-500 shrink-0 border border-red-500/30">
+                <Search className="w-8 h-8" />
+              </div>
+              <div className="space-y-4 w-full">
+                <div>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Raio-X de Aluno (Investigador)</h2>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Digite o nome de um aluno para varrer o banco. Descubra se ele possui contas duplicadas e em qual ID exato as missões e a XP foram gravadas.
+                  </p>
+                </div>
+                
+                <div className="flex flex-col sm:flex-row gap-4 pt-2">
+                  <input 
+                    type="text" 
+                    placeholder="Nome do aluno (ex: Alana)..."
+                    value={xraySearch}
+                    onChange={(e) => setXraySearch(e.target.value)}
+                    className="flex-1 bg-black/40 border border-white/10 rounded-xl p-4 text-sm focus:border-red-500 focus:outline-none transition-all text-white"
+                    onKeyDown={(e) => e.key === 'Enter' && handleXRay()}
+                  />
+                  <button 
+                    onClick={handleXRay}
+                    disabled={xrayLoading || !xraySearch}
+                    className="bg-red-500 hover:bg-red-600 text-white font-black py-4 px-8 rounded-xl transition-all neon-glow-red text-xs uppercase tracking-widest flex items-center justify-center gap-3 disabled:opacity-50"
+                  >
+                    {xrayLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
+                    Investigar
+                  </button>
+                </div>
+
+                {xrayResults && (
+                  <div className="mt-8 space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                    <div className="bg-black/60 border border-white/10 rounded-xl p-6">
+                       <h3 className="text-red-400 font-black uppercase tracking-widest mb-4">Contas Encontradas no Banco ({xrayResults.users.length})</h3>
+                       <div className="space-y-3">
+                         {xrayResults.users.map((u: any, i: number) => (
+                           <div key={i} className="p-4 border border-white/5 bg-white/5 rounded-lg text-xs font-mono space-y-1">
+                             <p><strong className="text-gray-500">NOME:</strong> <span className="text-white">{u.display_name}</span></p>
+                             <p><strong className="text-gray-500">ID PRINCIPAL:</strong> <span className="text-neon-blue">{u.id}</span></p>
+                             <p><strong className="text-gray-500">UID (FIREBASE):</strong> <span className="text-white">{u.uid || "Vazio"}</span></p>
+                             <p><strong className="text-gray-500">CÓDIGO/MATRÍCULA:</strong> <span className="text-white">{u.codigo || "Vazio"}</span></p>
+                             <p><strong className="text-gray-500">XP NESTA CONTA:</strong> <span className="text-green-400 font-bold">{u.xp || 0} XP</span></p>
+                           </div>
+                         ))}
+                         {xrayResults.users.length === 0 && <p className="text-gray-500 italic text-xs">Nenhuma conta encontrada.</p>}
+                       </div>
+                    </div>
+
+                    <div className="bg-black/60 border border-white/10 rounded-xl p-6">
+                       <h3 className="text-red-400 font-black uppercase tracking-widest mb-4">Missões Encontradas ({xrayResults.missions.length})</h3>
+                       <div className="max-h-64 overflow-y-auto custom-scrollbar space-y-2 pr-2">
+                         {xrayResults.missions.map((m: any, i: number) => (
+                           <div key={i} className="p-3 border border-white/5 bg-white/5 rounded-lg text-[10px] font-mono flex justify-between items-center">
+                             <div>
+                               <p className="text-white font-bold">{m.module} - Aula {m.class_num}</p>
+                               <p className="text-gray-500">Gravado no ID: <span className="text-mult-orange">{m.student_id}</span></p>
+                             </div>
+                             <div className="text-right">
+                               <p className="text-gray-400 uppercase">{m.status}</p>
+                               <p className="text-green-400 font-bold">+{m.xp_awarded || (m.status==='bonus'?100:50)} XP</p>
+                             </div>
+                           </div>
+                         ))}
+                         {xrayResults.missions.length === 0 && <p className="text-gray-500 italic text-xs">Nenhuma missão encontrada.</p>}
+                       </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
