@@ -49,7 +49,8 @@ import {
   Calendar, 
   BookOpen, 
   Settings, 
-  Download 
+  Download,
+  RefreshCw
 } from "lucide-react";
 
 export default function AdminDashboard({ profile }: { profile: UserProfile }) {
@@ -559,7 +560,8 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       e.target.value = "";
     }
   };
-const handleGlobalXPSync = async () => {
+
+  const handleGlobalXPSync = async () => {
     if (!confirm("ATENÇÃO: Isso irá recalcular o saldo de XP de TODOS os alunos com base no histórico de missões aprovadas e bônus. Deseja continuar?")) return;
     
     setLoading(true);
@@ -581,7 +583,6 @@ const handleGlobalXPSync = async () => {
         });
       }
 
-      // Prepara as promessas de atualização para todos os alunos que têm XP
       const updates = Object.entries(xpMap).map(([id, totalXp]) =>
         supabase.from("usuarios").update({ xp: totalXp }).eq("id", id)
       );
@@ -597,6 +598,7 @@ const handleGlobalXPSync = async () => {
       setLoading(false);
     }
   };
+
   const totalAlunos = counts.users.aluno;
   const avgXP = totalAlunos > 0 ? Math.round(users.filter(u => u.role === "aluno").reduce((acc, curr) => acc + (curr.xp || 0), 0) / (users.filter(u => u.role === "aluno").length || 1)) : 0;
 
@@ -1132,6 +1134,35 @@ const handleGlobalXPSync = async () => {
               </div>
             </div>
           </div>
+
+          {/* Módulo de Correção de XP (Global) */}
+          <div className="glass-card p-8 border-mult-orange/20 bg-mult-orange/5">
+            <div className="flex items-start gap-6">
+              <div className="w-16 h-16 rounded-2xl bg-mult-orange/20 flex items-center justify-center text-mult-orange shrink-0 border border-mult-orange/30">
+                <RefreshCw className="w-8 h-8" />
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Recálculo Global de XP</h2>
+                  <p className="text-gray-400 text-sm mt-1">
+                    Varre o banco de dados e recalcula o saldo total de XP de todos os alunos com base nas missões que constam como Aprovadas ou Bônus no histórico. Ideal para corrigir dessincronizações pós-migração.
+                  </p>
+                </div>
+                
+                <div className="pt-4">
+                  <button 
+                    onClick={handleGlobalXPSync}
+                    disabled={loading}
+                    className="bg-mult-orange hover:bg-mult-orange/80 text-white font-black py-4 px-8 rounded-xl transition-all neon-glow-orange text-xs uppercase tracking-widest flex items-center gap-3 disabled:opacity-50"
+                  >
+                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-5 h-5" />}
+                    Sincronizar XP de Todos os Alunos
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
         </div>
       ) : null}
 
