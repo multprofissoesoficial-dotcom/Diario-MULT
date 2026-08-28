@@ -8,9 +8,9 @@ import AdminDashboard from "./components/AdminDashboard";
 import CourseLobby from "./components/CourseLobby";
 import { motion, AnimatePresence } from "motion/react";
 import { Rocket, LogOut } from "lucide-react";
-import { auth, db } from "./firebase";
+import { auth } from "./firebase";
+import { supabase } from "./lib/supabase";
 import { useState, useEffect } from "react";
-import { collection, onSnapshot, query, doc, updateDoc } from "firebase/firestore";
 import { Enrollment } from "./types";
 
 export default function App() {
@@ -19,31 +19,54 @@ export default function App() {
   const [showLobby, setShowLobby] = useState(false);
 
   useEffect(() => {
-    if (user && profile?.role === "aluno") {
-      // ABSOLUTE STANDARD: Always use profile.id for document operations
-      const targetId = profile.id;
-      
-      const unsub = onSnapshot(collection(db, "users", targetId, "enrollments"), (snap) => {
-        const list = snap.docs.map(d => d.data() as Enrollment);
-        setEnrollments(list);
+    let isMounted = true;
+
+    async function fetchEnrollments() {
+      if (user && profile?.role === "aluno") {
+        const targetId = profile.id;
         
-        // If multiple enrollments and no currentCourseId, show lobby
-        if (list.length > 1 && !profile.currentCourseId) {
-          setShowLobby(true);
-        } else if (list.length === 1 && !profile.currentCourseId) {
-          // Auto-select the only course
-          updateDoc(doc(db, "users", targetId), {
-            currentCourseId: list[0].courseId
-          }).catch(console.error);
-          setShowLobby(false);
-        } else {
-          setShowLobby(false);
+        try {
+          // Busca matrículas direto do Supabase para evitar erros e cota do Firestore
+          const { data, error } = await supabase
+            .from("matriculas")
+            .select("*")
+            .eq("aluno_id", targetId);
+
+          if (!isMounted) return;
+
+          if (!error && data) {
+            const list: Enrollment[] = data.map((d: any) => ({
+              courseId: d.course_id || d.courseId || "INF",
+              courseName: d.course_name || d.courseName || "Informática",
+              currentLesson: d.current_lesson || 1,
+              status: d.status || "ativo"
+            }));
+            
+            setEnrollments(list);
+
+            if (list.length > 1 && !profile.currentCourseId) {
+              setShowLobby(true);
+            } else if (list.length === 1 && !profile.currentCourseId) {
+              await supabase
+                .from("usuarios")
+                .update({ current_course_id: list[0].courseId })
+                .eq("id", targetId);
+              setShowLobby(false);
+            } else {
+              setShowLobby(false);
+            }
+          }
+        } catch (err) {
+          console.error("Erro ao buscar matrículas no Supabase:", err);
         }
-      }, (err) => {
-        console.error("Error in enrollments snapshot:", err);
-      });
-      return () => unsub();
+      }
     }
+
+    fetchEnrollments();
+
+    return () => {
+      isMounted = false;
+    };
   }, [user, profile?.role, profile?.currentCourseId, profile?.id]);
 
   if (loading) {
