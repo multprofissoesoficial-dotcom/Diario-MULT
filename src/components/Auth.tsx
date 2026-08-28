@@ -1,213 +1,121 @@
-"use client";
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+import { adminAuth } from "@/lib/firebase-admin";
 
-import React, { useState, useEffect } from "react";
-import { UserProfile } from "../types";
-import AdminDashboard from "./AdminDashboard";
-import StudentDashboard from "./StudentDashboard";
-import AtsDashboard from "./AtsDashboard";
-import { auth as firebaseAuth } from "../firebase";
-import { 
-  signInWithEmailAndPassword, 
-  onAuthStateChanged 
-} from "firebase/auth";
-import { supabase } from "../lib/supabase";
-import { motion, AnimatePresence } from "motion/react";
-import { Rocket, Mail, Lock, Loader2, AlertCircle, ShieldCheck } from "lucide-react";
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+);
 
-export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
-  const [user, setUser] = useState<any>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [authError, setAuthError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+export async function POST(request: Request) {
+  try {
+    const authHeader = request.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+    }
 
-  // 1. Monitorar Sessão do Firebase Auth e Buscar Perfil no Supabase
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
-      setUser(firebaseUser);
-      if (firebaseUser) {
-        try {
-          // Busca o perfil na tabela 'usuarios' do Supabase usando o UID ou E-mail
-          let { data, error } = await supabase
-            .from("usuarios")
-            .select("*")
-            .or(`uid.eq.${firebaseUser.uid},id.eq.${firebaseUser.uid},email.eq.${firebaseUser.email}`)
-            .single();
-
-          if (error || !data) {
-            // Fallback caso não ache pelo UID exato, busca pelo e-mail exato normalizado
-            const { data: dataEmail } = await supabase
-              .from("usuarios")
-              .select("*")
-              .ilike("email", firebaseUser.email || "")
-              .single();
-            
-            data = dataEmail;
-          }
-
-          if (data) {
-            const mappedProfile: UserProfile = {
-              id: data.id,
-              uid: data.uid || data.id,
-              email: data.email,
-              displayName: data.display_name,
-              codigo: data.codigo,
-              role: data.role,
-              franquiaId: data.franquia_id,
-              turma: data.turma,
-              xp: data.xp || 0,
-              skills: data.skills || [],
-              resumeUrl: data.resume_url,
-              availabilityStatus: data.availability_status,
-              withdrawalReason: data.withdrawal_reason,
-              unlockedBadges: data.unlocked_badges || [],
-              currentCourseId: data.current_course_id || "INF",
-              atsTermsAccepted: Boolean(data.ats_terms_accepted),
-              atsTermsAcceptedAt: data.ats_terms_accepted_at,
-              perceptions: data.perceptions || {},
-              employmentHistory: data.employment_history || [],
-              createdAt: data.created_at,
-              lastLogin: data.last_login
-            };
-            setProfile(mappedProfile);
-          } else {
-            setAuthError("Perfil não encontrado no banco de dados do Supabase.");
-          }
-        } catch (err: any) {
-          console.error("Erro ao buscar perfil no Supabase:", err);
-          setAuthError("Erro ao carregar dados do perfil.");
-        }
-      } else {
-        setProfile(null);
-      }
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError("");
-    setSubmitting(true);
-
+    const token = authHeader.split("Bearer ")[1];
+    let decodedToken;
     try {
-      let loginEmail = email.trim().toLowerCase();
-      
-      // Se o usuário digitou apenas números, assume o padrão de login por código de matrícula
-      if (/^\d+$/.test(loginEmail)) {
-        loginEmail = `${loginEmail}@mult.com.br`;
+      if (adminAuth) {
+        decodedToken = await adminAuth.verifyIdToken(token);
       }
+    } catch (error) {
+      console.warn("Aviso de verificação de token Admin:", error);
+    }
 
-      await signInWithEmailAndPassword(firebaseAuth, loginEmail, password);
-    } catch (err: any) {
-      console.error("Erro no login:", err);
-      if (err.code === "auth/invalid-credential" || err.code === "auth/user-not-found" || err.code === "auth/wrong-password") {
-        setAuthError("E-mail, matrícula ou senha incorretos.");
+    const { nome, email, codigo, senha, role, franquiaId, turma } = await request.json();
+
+    if (!nome || !senha || !role) {
+      return NextResponse.json({ error: "Nome, senha e cargo são obrigatórios." }, { status: 400 });
+    }
+
+    if (role !== "master" && !franquiaId) {
+      return NextResponse.json({ error: "Unidade é obrigatória para este cargo." }, { status: 400 });
+    }
+
+    const cleanFranquia = franquiaId ? franquiaId.trim().toLowerCase() : "global";
+    const cleanCodigo = codigo ? String(codigo).trim() : "";
+    
+    // Geração de e-mail definitiva e segura:
+    // 1. Se o usuário preencheu um e-mail manual, usa-o.
+    // 2. Se for colaborador sem código (ex: master/professor/rh), usa o padrão unificado: franquia_nomeusuario@mult.com.br
+    // 3. Se for aluno com código, mantém a estrutura original: franquia_codigo@mult.com.br
+    let finalEmail = email ? email.trim().toLowerCase() : "";
+    if (!finalEmail) {
+      const cleanName = nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+      if (cleanCodigo) {
+        finalEmail = `${cleanFranquia}_${cleanCodigo}@mult.com.br`.toLowerCase().replace(/\s+/g, "");
       } else {
-        setAuthError("Erro ao autenticar. Verifique seus dados.");
+        finalEmail = `${cleanFranquia}_${cleanName}@mult.com.br`.toLowerCase().replace(/\s+/g, "");
       }
-    } finally {
-      setSubmitting(false);
     }
-  };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-cockpit-bg flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-10 h-10 text-mult-orange animate-spin" />
-          <p className="text-xs font-black uppercase tracking-widest text-gray-500">Conectando ao Cockpit...</p>
-        </div>
-      </div>
-    );
-  }
+    const userId = cleanCodigo && cleanFranquia !== "global" 
+      ? `${cleanFranquia}_${cleanCodigo}`.toLowerCase().replace(/\s+/g, "")
+      : `${cleanFranquia}_${nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "")}_${Date.now()}`.toLowerCase().replace(/\s+/g, "");
 
-  if (!user || !profile) {
-    return (
-      <div className="min-h-screen bg-cockpit-bg flex items-center justify-center p-4 relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-mult-orange/10 via-cockpit-bg to-cockpit-bg pointer-events-none" />
-        
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="glass-card max-w-md w-full p-8 relative z-10 space-y-8 border-white/10"
-        >
-          <div className="flex flex-col items-center text-center space-y-3">
-            <div className="w-16 h-16 rounded-2xl bg-mult-orange/20 flex items-center justify-center text-mult-orange neon-glow-orange border border-mult-orange/30">
-              <Rocket className="w-8 h-8" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-black tracking-tighter">MULT <span className="text-mult-orange">PROFISSÕES</span></h1>
-              <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mt-1">Portal Diário de Bordo 2.0</p>
-            </div>
-          </div>
+    const tempPassword = String(senha).trim();
 
-          <form onSubmit={handleLogin} className="space-y-5">
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">E-mail ou Matrícula</label>
-              <div className="relative">
-                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                <input 
-                  required
-                  type="text"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Seu e-mail ou código de matrícula"
-                  className="w-full pl-11 pr-4 py-3.5 bg-black/40 border border-white/10 rounded-xl text-sm focus:outline-none focus:border-mult-orange transition-all text-white placeholder:text-gray-600"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Senha</label>
-              <div className="relative">
-                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                <input 
-                  required
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Sua senha de acesso"
-                  className="w-full pl-11 pr-4 py-3.5 bg-black/40 border border-white/10 rounded-xl text-sm focus:outline-none focus:border-mult-orange transition-all text-white placeholder:text-gray-600"
-                />
-              </div>
-            </div>
-
-            {authError && (
-              <motion.div 
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-red-400 text-xs font-bold"
-              >
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{authError}</span>
-              </motion.div>
-            )}
-
-            <button 
-              type="submit"
-              disabled={submitting}
-              className="w-full bg-mult-orange hover:bg-mult-orange/90 text-white font-black py-4 rounded-xl transition-all neon-glow-orange uppercase tracking-widest text-xs flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-              {submitting ? "AUTENTICANDO..." : "ACESSAR COCKPIT"}
-            </button>
-          </form>
-        </motion.div>
-      </div>
-    );
-  }
-
-  // Roteamento baseado no cargo (Role) do Supabase
-  if (["master", "coordenador", "professor", "rh"].includes(profile.role)) {
-    if (profile.role === "rh") {
-      return <AtsDashboard profile={profile} />;
+    // Cria ou atualiza no Firebase Auth se disponível
+    let firebaseUid = userId;
+    if (adminAuth) {
+      try {
+        const userRecord = await adminAuth.getUserByEmail(finalEmail);
+        firebaseUid = userRecord.uid;
+        await adminAuth.updateUser(firebaseUid, { password: tempPassword, displayName: nome });
+      } catch (authErr: any) {
+        if (authErr.code === "auth/user-not-found" || authErr.message?.includes("NOT_FOUND")) {
+          const newUserRecord = await adminAuth.createUser({
+            email: finalEmail,
+            password: tempPassword,
+            displayName: nome,
+          });
+          firebaseUid = newUserRecord.uid;
+        }
+      }
     }
-    return <AdminDashboard profile={profile} />;
-  }
 
-  return <StudentDashboard profile={profile} />;
+    // Salva ou atualiza na tabela 'usuarios' do Supabase
+    const { error: userError } = await supabaseAdmin
+      .from("usuarios")
+      .upsert({
+        id: userId,
+        uid: firebaseUid,
+        display_name: nome,
+        email: finalEmail,
+        codigo: cleanCodigo || null,
+        role: role,
+        franquia_id: cleanFranquia,
+        turma: turma || (role === "aluno" ? "024inf" : null),
+        xp: 0,
+        unlocked_badges: [],
+        created_at: new Date().toISOString()
+      }, { onConflict: "id" });
+
+    if (userError) {
+      console.error("Erro ao salvar usuário no Supabase:", userError);
+      return NextResponse.json({ error: userError.message }, { status: 500 });
+    }
+
+    // Se for aluno, garante o registro inicial na tabela de matriculas
+    if (role === "aluno") {
+      await supabaseAdmin
+        .from("matriculas")
+        .upsert({
+          aluno_id: userId,
+          course_id: "INF",
+          course_name: "Informática",
+          current_lesson: 1,
+          status: "ativo",
+          enrolled_at: new Date().toISOString(),
+          unlocked_badges: []
+        }, { onConflict: "aluno_id, course_id" });
+    }
+
+    return NextResponse.json({ success: true, message: "Usuário cadastrado com sucesso!" });
+  } catch (error: any) {
+    console.error("Erro geral na API de criação de usuário:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 }
