@@ -97,6 +97,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [importingToSupabase, setImportingToSupabase] = useState(false);
   const [supabaseImportReport, setSupabaseImportReport] = useState<any>(null);
 
+  // States do Módulo Raio-X de Investigação
   const [xraySearch, setXraySearch] = useState("");
   const [xrayResults, setXrayResults] = useState<any>(null);
   const [xrayLoading, setXrayLoading] = useState(false);
@@ -567,6 +568,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
+  // 🔥 Sincronização Global Refatorada - Força Bruta JS para vencer as amarras do Postgres 🔥
   const handleGlobalXPSync = async () => {
     if (!confirm("ATENÇÃO: Isso irá recalcular o saldo de XP de TODOS os alunos com base no histórico de missões aprovadas e bônus. Deseja continuar?")) return;
     
@@ -612,11 +614,11 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       let mHasMore = true;
 
       while (mHasMore) {
+        // 🔥 Removemos o ".in('status')" para o Supabase trazer tudo. Vamos limpar a sujeira via JavaScript. 🔥
         const { data: mData, error: mErr } = await supabase
           .from("missoes")
           .select("student_id, status, xp_awarded")
-          .in("status", ["approved", "bonus"])
-          .order('id') // Ordem estrita para não pular missões
+          .order('id') 
           .range(mPage * 1000, (mPage + 1) * 1000 - 1);
 
         if (mErr) throw mErr;
@@ -631,19 +633,23 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
       const xpMap: Record<string, number> = {};
       allMissionsFromDB.forEach(m => {
-        // 🔥 A MÁGICA DA CORREÇÃO AQUI 🔥
-        // Ignoramos completamente se a missão está com "0" salvo no banco (o erro legado).
-        // Se o status é aprovado ou bônus, forçamos o valor real da regra de negócio.
-        let xp = Number(m.xp_awarded);
-        if (!xp || xp === 0) {
-           xp = (m.status === 'bonus') ? XP_BONUS : XP_PER_MISSION; // 100 ou 50 XP
-        }
-           
-        const sId = String(m.student_id).trim();
-        const canonicalId = userMap[sId] || sId; 
+        // Padroniza status bizarros que vieram de importação (espaços soltos, letras maiúsculas, etc)
+        const st = String(m.status || "").toLowerCase().trim();
+        
+        // Se a string contiver qualquer variação de aprovado ou bônus, nós computamos a XP.
+        if (st === 'approved' || st === 'bonus' || st === 'aprovado' || st === 'aprovada' || st === 'concluido') {
+          // A regra de ouro: Ignora se a tabela tiver "0" gravado. Força 50 ou 100.
+          let xp = Number(m.xp_awarded);
+          if (!xp || xp === 0 || isNaN(xp)) {
+             xp = (st === 'bonus') ? XP_BONUS : XP_PER_MISSION;
+          }
+             
+          const sId = String(m.student_id).trim();
+          const canonicalId = userMap[sId] || sId; 
 
-        if (!xpMap[canonicalId]) xpMap[canonicalId] = 0;
-        xpMap[canonicalId] += xp;
+          if (!xpMap[canonicalId]) xpMap[canonicalId] = 0;
+          xpMap[canonicalId] += xp;
+        }
       });
 
       let successCount = 0;
