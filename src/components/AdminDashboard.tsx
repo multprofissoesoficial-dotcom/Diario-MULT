@@ -566,31 +566,79 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     
     setLoading(true);
     try {
-      const { data: missoes, error: errMissions } = await supabase
-        .from("missoes")
-        .select("student_id, status, xp_awarded")
-        .in("status", ["approved", "bonus"]);
-
-      if (errMissions) throw errMissions;
-
-      const xpMap: Record<string, number> = {};
-      if (missoes) {
-        missoes.forEach(m => {
-          const xp = m.xp_awarded ? Number(m.xp_awarded) : (m.status === 'bonus' ? XP_BONUS : XP_PER_MISSION);
-          const sId = m.student_id;
-          if (!xpMap[sId]) xpMap[sId] = 0;
-          xpMap[sId] += xp;
-        });
+      // 1. Busca todos os usuários com paginação para cruzar IDs com UIDs e vencer limite de 1000
+      let allUsers: any[] = [];
+      let uPage = 0;
+      let uHasMore = true;
+      
+      while(uHasMore) {
+        const { data: uData, error: uErr } = await supabase
+          .from("usuarios")
+          .select("id, uid")
+          .range(uPage * 1000, (uPage + 1) * 1000 - 1);
+        
+        if (uErr) throw uErr;
+        if (uData && uData.length > 0) {
+          allUsers = [...allUsers, ...uData];
+          uPage++;
+        } else {
+          uHasMore = false;
+        }
       }
 
+      const userMap: Record<string, string> = {};
+      allUsers.forEach(u => {
+        userMap[u.id] = u.id; // Mapa id para id
+        if (u.uid) userMap[u.uid] = u.id; // Mapa uid do firebase para id
+      });
+
+      // 2. Busca todas as missões aprovadas/bonus com paginação para vencer limite de 1000
+      let allMissionsFromDB: any[] = [];
+      let mPage = 0;
+      let mHasMore = true;
+
+      while (mHasMore) {
+        const { data: mData, error: mErr } = await supabase
+          .from("missoes")
+          .select("student_id, status, xp_awarded")
+          .in("status", ["approved", "bonus"])
+          .range(mPage * 1000, (mPage + 1) * 1000 - 1);
+
+        if (mErr) throw mErr;
+
+        if (mData && mData.length > 0) {
+          allMissionsFromDB = [...allMissionsFromDB, ...mData];
+          mPage++;
+        } else {
+          mHasMore = false;
+        }
+      }
+
+      // 3. Calcula o total por Aluno usando o ID principal (corrigindo conflito UID vs ID)
+      const xpMap: Record<string, number> = {};
+      allMissionsFromDB.forEach(m => {
+        const xp = m.xp_awarded ? Number(m.xp_awarded) : (m.status === 'bonus' ? XP_BONUS : XP_PER_MISSION);
+        const sId = m.student_id;
+        const canonicalId = userMap[sId] || sId; // Busca ID unificado ou usa o atual
+
+        if (!xpMap[canonicalId]) xpMap[canonicalId] = 0;
+        xpMap[canonicalId] += xp;
+      });
+
+      // 4. Executa a atualização fracionada no Supabase
       const updates = Object.entries(xpMap).map(([id, totalXp]) =>
         supabase.from("usuarios").update({ xp: totalXp }).eq("id", id)
       );
 
-      await Promise.all(updates);
+      const chunkSize = 50;
+      for (let i = 0; i < updates.length; i += chunkSize) {
+        const chunk = updates.slice(i, i + chunkSize);
+        await Promise.all(chunk);
+      }
 
       alert(`Sincronização global concluída! Saldo de XP de ${updates.length} alunos foram recalculados e corrigidos.`);
       fetchUsers(true); 
+      fetchCounts();
     } catch (err: any) {
       console.error("Erro ao sincronizar XP:", err);
       alert("Erro ao recalcular XP: " + err.message);
