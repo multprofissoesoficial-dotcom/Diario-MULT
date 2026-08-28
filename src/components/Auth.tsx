@@ -23,7 +23,7 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
   const [authError, setAuthError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // 1. Monitorar Sessão e Sincronizar Perfil (Foco Universal em E-mail e UID)
+  // 1. Monitorar Sessão e Sincronizar via API Segura
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
       if (!firebaseUser) {
@@ -36,64 +36,51 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
       setUser(firebaseUser);
       
       try {
-        let foundData = null;
+        const token = await firebaseUser.getIdToken();
+        const res = await fetch("/api/auth/sync", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify({ email: firebaseUser.email })
+        });
 
-        // Prioridade 1: Buscar primariamente pelo E-mail exato normalizado (funciona para 100% dos usuários: Alunos e Masters)
-        if (firebaseUser.email) {
-          const { data: dataEmail } = await supabase
-            .from("usuarios")
-            .select("*")
-            .ilike("email", firebaseUser.email.trim())
-            .maybeSingle();
+        const result = await res.json();
 
-          if (dataEmail) foundData = dataEmail;
+        if (!res.ok || !result.profile) {
+          throw new Error(result.error || "Perfil não encontrado.");
         }
 
-        // Prioridade 2: Se não achar por e-mail, tenta por UID ou ID direto
-        if (!foundData && firebaseUser.uid) {
-          const { data: dataUid } = await supabase
-            .from("usuarios")
-            .select("*")
-            .or(`uid.eq.${firebaseUser.uid},id.eq.${firebaseUser.uid}`)
-            .maybeSingle();
-
-          if (dataUid) foundData = dataUid;
-        }
-
-        if (foundData) {
-          const mappedProfile: UserProfile = {
-            id: foundData.id,
-            uid: foundData.uid || firebaseUser.uid,
-            email: foundData.email,
-            displayName: foundData.display_name,
-            codigo: foundData.codigo,
-            role: foundData.role,
-            franquiaId: foundData.franquia_id,
-            turma: foundData.turma,
-            xp: foundData.xp || 0,
-            skills: foundData.skills || [],
-            resumeUrl: foundData.resume_url,
-            availabilityStatus: foundData.availability_status,
-            withdrawalReason: foundData.withdrawal_reason,
-            unlockedBadges: foundData.unlocked_badges || [],
-            currentCourseId: foundData.current_course_id || "INF",
-            atsTermsAccepted: Boolean(foundData.ats_terms_accepted),
-            atsTermsAcceptedAt: foundData.ats_terms_accepted_at,
-            perceptions: foundData.perceptions || {},
-            employmentHistory: foundData.employment_history || [],
-            createdAt: foundData.created_at,
-            lastLogin: foundData.last_login
-          };
-          setProfile(mappedProfile);
-          setAuthError("");
-        } else {
-          console.error("Perfil não encontrado no Supabase para o e-mail:", firebaseUser.email);
-          setAuthError(`Perfil não encontrado no banco de dados para a conta: ${firebaseUser.email}`);
-          setProfile(null);
-        }
+        const foundData = result.profile;
+        const mappedProfile: UserProfile = {
+          id: foundData.id,
+          uid: foundData.uid || firebaseUser.uid,
+          email: foundData.email,
+          displayName: foundData.display_name,
+          codigo: foundData.codigo,
+          role: foundData.role,
+          franquiaId: foundData.franquia_id,
+          turma: foundData.turma,
+          xp: foundData.xp || 0,
+          skills: foundData.skills || [],
+          resumeUrl: foundData.resume_url,
+          availabilityStatus: foundData.availability_status,
+          withdrawalReason: foundData.withdrawal_reason,
+          unlockedBadges: foundData.unlocked_badges || [],
+          currentCourseId: foundData.current_course_id || "INF",
+          atsTermsAccepted: Boolean(foundData.ats_terms_accepted),
+          atsTermsAcceptedAt: foundData.ats_terms_accepted_at,
+          perceptions: foundData.perceptions || {},
+          employmentHistory: foundData.employment_history || [],
+          createdAt: foundData.created_at,
+          lastLogin: foundData.last_login
+        };
+        setProfile(mappedProfile);
+        setAuthError("");
       } catch (err: any) {
-        console.error("Erro ao buscar perfil no Supabase:", err);
-        setAuthError("Erro ao carregar dados do perfil.");
+        console.error("Erro ao sincronizar perfil:", err);
+        setAuthError(`Perfil não encontrado no banco de dados para: ${firebaseUser.email}`);
         setProfile(null);
       } finally {
         setLoading(false);
