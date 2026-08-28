@@ -21,7 +21,7 @@ export async function POST(request: Request) {
         decodedToken = await adminAuth.verifyIdToken(token);
       }
     } catch (error) {
-      console.warn("Aviso de verificação de token Firebase:", error);
+      console.warn("Aviso token:", error);
     }
 
     const body = await request.json().catch(() => ({}));
@@ -29,36 +29,27 @@ export async function POST(request: Request) {
     const firebaseUid = decodedToken?.uid || body.uid;
 
     if (!firebaseEmail) {
-      return NextResponse.json({ error: "E-mail não fornecido pelo Firebase" }, { status: 400 });
+      return NextResponse.json({ error: "E-mail não fornecido" }, { status: 400 });
     }
 
     const cleanEmail = String(firebaseEmail).toLowerCase().trim();
 
-    // 1. Busca todos os usuários do Supabase
     const { data: users, error } = await supabaseAdmin
       .from("usuarios")
       .select("*");
 
     if (error) {
-      console.error("Erro ao consultar Supabase:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 2. Tenta encontrar pelo e-mail (insensível a maiúsculas/minúsculas)
-    let matchedUser = (users || []).find((u: any) => {
-      if (!u.email) return false;
-      return String(u.email).toLowerCase().trim() === cleanEmail;
-    });
+    let matchedUser = (users || []).find((u: any) => u.email && String(u.email).toLowerCase().trim() === cleanEmail);
 
-    // 3. Se ainda não achou, tenta pelo UID do Firebase
     if (!matchedUser && firebaseUid) {
       matchedUser = (users || []).find((u: any) => u.uid === firebaseUid || u.id === firebaseUid);
     }
 
-    // 4. AUTO-HEALING (Auto-cura): Se o usuário existe no Firebase mas não está na tabela usuarios, cria um perfil padrão para ele não quebrar
+    // Auto-Healing: Cria o perfil automaticamente se ele não existir no Supabase
     if (!matchedUser) {
-      console.warn(`[AUTO-HEALING] Usuário autenticado no Firebase (${cleanEmail}) não estava no Supabase. Criando perfil...`);
-      
       const isMasterAdmin = cleanEmail.includes("fausto") || cleanEmail.includes("admin") || cleanEmail.includes("master");
       const newUserId = firebaseUid || `user_${Date.now()}`;
       
@@ -74,24 +65,21 @@ export async function POST(request: Request) {
         created_at: new Date().toISOString()
       };
 
-      const { data: insertedUser, error: insertError } = await supabaseAdmin
+      const { data: insertedUser } = await supabaseAdmin
         .from("usuarios")
         .upsert(defaultProfile, { onConflict: "id" })
         .select()
         .single();
 
-      if (!insertError && insertedUser) {
-        matchedUser = insertedUser;
-      }
+      if (insertedUser) matchedUser = insertedUser;
     }
 
     if (!matchedUser) {
-      return NextResponse.json({ error: `Falha crítica ao sincronizar perfil para: ${cleanEmail}` }, { status: 404 });
+      return NextResponse.json({ error: "Perfil não encontrado" }, { status: 404 });
     }
 
     return NextResponse.json({ success: true, profile: matchedUser });
   } catch (err: any) {
-    console.error("Erro crítico na API de sync:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
