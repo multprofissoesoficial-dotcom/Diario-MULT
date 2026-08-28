@@ -23,91 +23,77 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
   const [authError, setAuthError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // 1. Monitorar Sessão e Sincronizar Perfil com Auto-Cura de UID
+  // 1. Monitorar Sessão e Sincronizar Perfil de forma Fluida e Estável
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
-      setUser(firebaseUser);
-      if (firebaseUser) {
-        try {
-          let foundData = null;
-
-          // Tentativa A: Buscar por UID exato
-          if (firebaseUser.uid) {
-            const { data: dataUid } = await supabase
-              .from("usuarios")
-              .select("*")
-              .eq("uid", firebaseUser.uid)
-              .maybeSingle();
-
-            if (dataUid) foundData = dataUid;
-          }
-
-          // Tentativa B: Buscar por ID igual ao UID
-          if (!foundData && firebaseUser.uid) {
-            const { data: dataId } = await supabase
-              .from("usuarios")
-              .select("*")
-              .eq("id", firebaseUser.uid)
-              .maybeSingle();
-
-            if (dataId) foundData = dataId;
-          }
-
-          // Tentativa C: Buscar por E-mail (Auto-cura de UID caso tenha sido recriado no Firebase)
-          if (!foundData && firebaseUser.email) {
-            const { data: dataEmail } = await supabase
-              .from("usuarios")
-              .select("*")
-              .ilike("email", firebaseUser.email.trim())
-              .maybeSingle();
-
-            if (dataEmail) {
-              foundData = dataEmail;
-              // Atualiza automaticamente o UID no Supabase para casar com o Firebase atual
-              await supabase
-                .from("usuarios")
-                .update({ uid: firebaseUser.uid })
-                .eq("id", dataEmail.id);
-            }
-          }
-
-          if (foundData) {
-            const mappedProfile: UserProfile = {
-              id: foundData.id,
-              uid: foundData.uid || firebaseUser.uid,
-              email: foundData.email,
-              displayName: foundData.display_name,
-              codigo: foundData.codigo,
-              role: foundData.role,
-              franquiaId: foundData.franquia_id,
-              turma: foundData.turma,
-              xp: foundData.xp || 0,
-              skills: foundData.skills || [],
-              resumeUrl: foundData.resume_url,
-              availabilityStatus: foundData.availability_status,
-              withdrawalReason: foundData.withdrawal_reason,
-              unlockedBadges: foundData.unlocked_badges || [],
-              currentCourseId: foundData.current_course_id || "INF",
-              atsTermsAccepted: Boolean(foundData.ats_terms_accepted),
-              atsTermsAcceptedAt: foundData.ats_terms_accepted_at,
-              perceptions: foundData.perceptions || {},
-              employmentHistory: foundData.employment_history || [],
-              createdAt: foundData.created_at,
-              lastLogin: foundData.last_login
-            };
-            setProfile(mappedProfile);
-          } else {
-            console.error("Perfil não localizado no Supabase para UID:", firebaseUser.uid, "Email:", firebaseUser.email);
-            setAuthError(`Perfil não encontrado no banco de dados para a conta: ${firebaseUser.email}`);
-          }
-        } catch (err: any) {
-          console.error("Erro ao buscar perfil no Supabase:", err);
-          setAuthError("Erro ao carregar dados do perfil.");
-        }
-      } else {
+      if (!firebaseUser) {
+        setUser(null);
         setProfile(null);
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+
+      setUser(firebaseUser);
+      
+      try {
+        let foundData = null;
+
+        // Estratégia de busca segura em cascata (UID, ID ou E-mail)
+        const { data: dataUid } = await supabase
+          .from("usuarios")
+          .select("*")
+          .or(`uid.eq.${firebaseUser.uid},id.eq.${firebaseUser.uid}`)
+          .maybeSingle();
+
+        if (dataUid) {
+          foundData = dataUid;
+        } else if (firebaseUser.email) {
+          const { data: dataEmail } = await supabase
+            .from("usuarios")
+            .select("*")
+            .ilike("email", firebaseUser.email.trim())
+            .maybeSingle();
+
+          foundData = dataEmail;
+        }
+
+        if (foundData) {
+          const mappedProfile: UserProfile = {
+            id: foundData.id,
+            uid: foundData.uid || firebaseUser.uid,
+            email: foundData.email,
+            displayName: foundData.display_name,
+            codigo: foundData.codigo,
+            role: foundData.role,
+            franquiaId: foundData.franquia_id,
+            turma: foundData.turma,
+            xp: foundData.xp || 0,
+            skills: foundData.skills || [],
+            resumeUrl: foundData.resume_url,
+            availabilityStatus: foundData.availability_status,
+            withdrawalReason: foundData.withdrawal_reason,
+            unlockedBadges: foundData.unlocked_badges || [],
+            currentCourseId: foundData.current_course_id || "INF",
+            atsTermsAccepted: Boolean(foundData.ats_terms_accepted),
+            atsTermsAcceptedAt: foundData.ats_terms_accepted_at,
+            perceptions: foundData.perceptions || {},
+            employmentHistory: foundData.employment_history || [],
+            createdAt: foundData.created_at,
+            lastLogin: foundData.last_login
+          };
+          setProfile(mappedProfile);
+          setAuthError("");
+        } else {
+          setAuthError(`Perfil não encontrado no banco de dados para: ${firebaseUser.email}`);
+          setProfile(null);
+        }
+      } catch (err: any) {
+        console.error("Erro ao buscar perfil no Supabase:", err);
+        setAuthError("Erro ao carregar dados do perfil.");
+        setProfile(null);
+      } finally {
+        setLoading(false);
+      }
     });
 
     return () => unsubscribe();
