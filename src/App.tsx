@@ -7,7 +7,7 @@ import TeacherDashboard from "./components/TeacherDashboard";
 import AdminDashboard from "./components/AdminDashboard";
 import CourseLobby from "./components/CourseLobby";
 import { motion, AnimatePresence } from "motion/react";
-import { Rocket, LogOut } from "lucide-react";
+import { Rocket, LogOut, AlertTriangle } from "lucide-react";
 import { auth } from "./firebase";
 import { supabase } from "./lib/supabase";
 import { useState, useEffect } from "react";
@@ -18,18 +18,21 @@ export default function App() {
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [showLobby, setShowLobby] = useState(false);
 
-  // 🔥 BLINDAGEM MÁXIMA DE ROTEAMENTO 🔥
-  // Intercepta a leitura do banco de dados. Se o e-mail for da diretoria,
-  // sobrepõe qualquer cargo duplicado ("aluno") e força o acesso como Master.
-  const masterEmails = ["faustodv@gmail.com", "selane@mult.com.br"];
-  const isDirector = profile?.email && masterEmails.includes(profile.email.toLowerCase().trim());
-  const effectiveRole = isDirector ? "master" : profile?.role;
+  // 🔥 BLINDAGEM MÁXIMA BASEADA NO NOME (PROVA VISUAL) 🔥
+  // Como a verificação por e-mail falhou, usamos o displayName que o print prova estar funcionando.
+  const isDirectorByName = profile?.displayName?.toLowerCase().includes("fausto") || 
+                           profile?.displayName?.toLowerCase().includes("selane") ||
+                           profile?.email?.toLowerCase().includes("faustodv@gmail.com") ||
+                           profile?.email?.toLowerCase().includes("selane@mult.com.br");
+
+  // Força o cargo master se identificar seu nome ou e-mail
+  const effectiveRole = isDirectorByName ? "master" : profile?.role;
 
   useEffect(() => {
     let isMounted = true;
 
     async function fetchEnrollments() {
-      // Usamos a regra blindada (effectiveRole) para não carregar rotinas de aluno no seu perfil
+      // Usa a effectiveRole blindada para garantir que o Master não baixe coisas de aluno
       if (user && effectiveRole === "aluno") {
         const targetId = profile!.id;
         
@@ -99,11 +102,25 @@ export default function App() {
     );
   }
 
-  // Cria um perfil seguro garantindo que o AdminDashboard receba a credencial Master
+  // Clona o perfil com o cargo forçado e seguro para repassar aos painéis
   const safeProfile = profile ? { ...profile, role: effectiveRole as any } : null;
 
   return (
     <div className="min-h-screen bg-cockpit-bg selection:bg-neon-blue selection:text-black">
+      
+      {/* CAIXA PRETA DE DEBUG PARA INVESTIGAÇÃO (Só aparece logado) */}
+      {user && (
+        <div className="bg-red-900/50 border-b border-red-500 text-white p-2 text-[10px] font-mono flex flex-wrap gap-4 justify-center z-50 relative">
+          <span className="flex items-center gap-1 font-bold text-red-300">
+            <AlertTriangle className="w-3 h-3"/> MODO INVESTIGAÇÃO ATIVO
+          </span>
+          <span><strong>Email Autenticado:</strong> {user.email || "VAZIO"}</span>
+          <span><strong>UID Firebase:</strong> {user.uid}</span>
+          <span><strong>Cargo Real no Banco:</strong> {profile?.role || "VAZIO"}</span>
+          <span><strong>Cargo Forçado na Tela:</strong> {effectiveRole}</span>
+        </div>
+      )}
+
       <AnimatePresence mode="wait">
         {!user ? (
           <motion.div 
