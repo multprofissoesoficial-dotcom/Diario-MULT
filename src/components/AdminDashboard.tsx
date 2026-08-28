@@ -54,6 +54,10 @@ import {
 } from "lucide-react";
 
 export default function AdminDashboard({ profile }: { profile: UserProfile }) {
+  // 🔥 IDENTIFICADOR DE ADMIN GERAL 🔥
+  // Apenas este e-mail tem visão global de todas as unidades. Os demais Masters ficam presos à própria unidade.
+  const isGlobalAdmin = profile.email?.toLowerCase().trim() === "faustodv@gmail.com";
+
   const [franquias, setFranquias] = useState<Franquia[]>([]);
   const [selectedFranquia, setSelectedFranquia] = useState<string>(profile.franquiaId || "all");
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -130,7 +134,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   useEffect(() => {
     const fetchTurmas = async () => {
       let query = supabase.from("usuarios").select("turma").not("turma", "is", null);
-      if (profile.role !== "master") {
+      if (!isGlobalAdmin) {
         query = query.eq("franquia_id", profile.franquiaId);
       } else if (selectedFranquia !== "all") {
         query = query.eq("franquia_id", selectedFranquia);
@@ -143,17 +147,17 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       }
     };
     fetchTurmas();
-  }, [selectedFranquia, profile.franquiaId, profile.role]);
+  }, [selectedFranquia, profile.franquiaId, isGlobalAdmin]);
 
   useEffect(() => {
     fetchCounts();
-  }, [selectedFranquia, profile.franquiaId, profile.role]);
+  }, [selectedFranquia, profile.franquiaId, isGlobalAdmin]);
 
   const fetchCounts = async () => {
     try {
       const getCount = async (table: string, applyFilter?: (q: any) => any) => {
         let q = supabase.from(table).select("*", { count: "exact", head: true });
-        if (profile.role !== "master") {
+        if (!isGlobalAdmin) {
           q = q.eq("franquia_id", profile.franquiaId);
         } else if (selectedFranquia !== "all") {
           q = q.eq("franquia_id", selectedFranquia);
@@ -197,7 +201,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   useEffect(() => {
     setPage(0);
     fetchUsers(true);
-  }, [selectedFranquia, profile.franquiaId, profile.role, roleFilter, turmaFilter, searchQuery]);
+  }, [selectedFranquia, profile.franquiaId, isGlobalAdmin, roleFilter, turmaFilter, searchQuery]);
 
   const fetchUsers = async (reset = false) => {
     setLoading(true);
@@ -208,7 +212,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
       let q = supabase.from("usuarios").select("*").range(from, to).order("display_name", { ascending: true });
 
-      if (profile.role !== "master") {
+      if (!isGlobalAdmin) {
         q = q.eq("franquia_id", profile.franquiaId);
       } else if (selectedFranquia !== "all") {
         q = q.eq("franquia_id", selectedFranquia);
@@ -272,7 +276,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   useEffect(() => {
     setMissionsPage(0);
     fetchMissions(true);
-  }, [selectedFranquia, profile.franquiaId, profile.role, activityStatusFilter, activitySearch, dateFilter]);
+  }, [selectedFranquia, profile.franquiaId, isGlobalAdmin, activityStatusFilter, activitySearch, dateFilter]);
 
   const fetchMissions = async (reset = false) => {
     setLoading(true);
@@ -283,7 +287,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
       let q = supabase.from("missoes").select("*").range(from, to).order("created_at", { ascending: false });
 
-      if (profile.role !== "master") {
+      if (!isGlobalAdmin) {
         q = q.eq("franquia_id", profile.franquiaId);
       } else if (selectedFranquia !== "all") {
         q = q.eq("franquia_id", selectedFranquia);
@@ -386,7 +390,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       alert("Nome e Senha são obrigatórios.");
       return;
     }
-    if (newUser.role !== "master" && !newUser.franquiaId) {
+    if (!isGlobalAdmin && !newUser.franquiaId) {
       alert("Selecione uma unidade para este usuário.");
       return;
     }
@@ -681,7 +685,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
               </h1>
             </div>
             <p className="text-gray-500 text-[10px] sm:text-xs font-bold uppercase tracking-widest mt-2 ml-1">
-              {profile.role === "master" ? "Gestão Global Master (Supabase)" : `Unidade: ${franquias.find(f => f.id === profile.franquiaId)?.nome || "Carregando..."}`}
+              {isGlobalAdmin ? "Gestão Global Master (Supabase)" : `Unidade: ${franquias.find(f => f.id === profile.franquiaId)?.nome || "Carregando..."}`}
             </p>
           </div>
           <button 
@@ -735,7 +739,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             <Briefcase className="w-4 h-4" /> Agência (ATS)
           </button>
         )}
-        {profile.role === "master" && (
+        {isGlobalAdmin && (
           <>
             <button
               onClick={() => setActiveTab("courses")}
@@ -767,12 +771,12 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
               <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Filtrar Unidade</span>
             </div>
             <select 
-              disabled={profile.role !== "master"}
+              disabled={!isGlobalAdmin}
               value={selectedFranquia}
               onChange={(e) => setSelectedFranquia(e.target.value)}
               className="bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-neon-blue transition-all w-full sm:w-auto min-w-[200px]"
             >
-              {profile.role === "master" && <option value="all" className="bg-cockpit-bg">Todas as Unidades</option>}
+              {isGlobalAdmin && <option value="all" className="bg-cockpit-bg">Todas as Unidades</option>}
               {franquias.map(f => (
                 <option key={f.id} value={f.id} className="bg-cockpit-bg">{f.nome}</option>
               ))}
@@ -786,7 +790,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             >
               <UserPlus className="w-4 h-4" /> Novo Usuário
             </button>
-            {profile.role === "master" && (
+            {isGlobalAdmin && (
               <button 
                 onClick={() => setShowImportModal(true)}
                 className="flex-1 sm:flex-none bg-neon-blue/20 hover:bg-neon-blue/30 text-neon-blue border border-neon-blue/30 font-bold py-3 px-4 sm:px-6 rounded-xl transition-all text-[10px] sm:text-xs uppercase tracking-widest flex items-center justify-center gap-2"
@@ -1301,7 +1305,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                       onChange={e => setNewUser({...newUser, role: e.target.value as any})}
                       className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
                     >
-                      {profile.role === "master" && <option value="master" className="bg-cockpit-bg">Master</option>}
+                      {isGlobalAdmin && <option value="master" className="bg-cockpit-bg">Master</option>}
                       <option value="coordenador" className="bg-cockpit-bg">Coordenador</option>
                       <option value="professor" className="bg-cockpit-bg">Professor</option>
                       <option value="rh" className="bg-cockpit-bg">Estagiária de RH</option>
@@ -1325,7 +1329,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Franquia / Unidade</label>
                   <select 
-                    disabled={profile.role !== "master"}
+                    disabled={!isGlobalAdmin}
                     value={newUser.franquiaId}
                     onChange={e => setNewUser({...newUser, franquiaId: e.target.value})}
                     className="w-full bg-white/5 border border-white/10 rounded-lg p-3 text-sm focus:outline-none focus:border-neon-blue"
