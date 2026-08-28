@@ -23,7 +23,6 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
   const [authError, setAuthError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // 1. Monitorar Sessão e Sincronizar via API Segura
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
       if (!firebaseUser) {
@@ -43,7 +42,7 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${token}`
           },
-          body: JSON.stringify({ email: firebaseUser.email })
+          body: JSON.stringify({ email: firebaseUser.email, uid: firebaseUser.uid })
         });
 
         const result = await res.json();
@@ -80,7 +79,7 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
         setAuthError("");
       } catch (err: any) {
         console.error("Erro ao sincronizar perfil:", err);
-        setAuthError(`Perfil não encontrado no banco de dados para: ${firebaseUser.email}`);
+        setAuthError(`Erro ao carregar perfil para: ${firebaseUser.email}`);
         setProfile(null);
       } finally {
         setLoading(false);
@@ -99,7 +98,6 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
       let inputVal = email.trim();
       let targetEmail = inputVal.toLowerCase();
       
-      // Se digitou apenas números (matrícula de aluno), busca o e-mail real correspondente no Supabase
       if (/^\d+$/.test(inputVal)) {
         const { data: userRecord, error: searchError } = await supabase
           .from("usuarios")
