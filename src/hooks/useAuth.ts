@@ -26,38 +26,49 @@ export function useAuth() {
         const userEmail = (firebaseUser.email || "").toLowerCase().trim();
         let foundData = null;
 
-        // 1. Busca Otimizada: Procura diretamente o e-mail no banco, vencendo o limite de 1000 linhas
+        // 1. Busca Otimizada em Array: Traz TODOS os registros vinculados ao e-mail
         if (userEmail) {
-          const { data: dataEmail, error: emailError } = await supabase
+          const { data: dataEmails, error: emailError } = await supabase
             .from("usuarios")
             .select("*")
-            .ilike("email", userEmail)
-            .maybeSingle();
+            .ilike("email", userEmail);
 
-          if (dataEmail) {
-            foundData = dataEmail;
+          if (dataEmails && dataEmails.length > 0) {
+            // BLINDAGEM MÁXIMA DE HIERARQUIA: 
+            // Se houver perfis duplicados (ex: importou o master como aluno sem querer),
+            // o sistema varre a lista e FORÇA o login na conta com o cargo mais alto.
+            foundData = dataEmails.find(d => String(d.role).toLowerCase().trim() === "master")
+                     || dataEmails.find(d => String(d.role).toLowerCase().trim() === "coordenador")
+                     || dataEmails.find(d => String(d.role).toLowerCase().trim() === "rh")
+                     || dataEmails.find(d => String(d.role).toLowerCase().trim() === "professor")
+                     || dataEmails[0]; // Se só houver aluno, entra como aluno
           }
         }
 
         // 2. Fallback: Tenta por UID do Firebase caso o e-mail não seja encontrado
         if (!foundData && firebaseUser.uid) {
-          const { data: dataUid } = await supabase
+          const { data: dataUids } = await supabase
             .from("usuarios")
             .select("*")
-            .or(`uid.eq.${firebaseUser.uid},id.eq.${firebaseUser.uid}`)
-            .maybeSingle();
+            .or(`uid.eq.${firebaseUser.uid},id.eq.${firebaseUser.uid}`);
 
-          if (dataUid) foundData = dataUid;
+          if (dataUids && dataUids.length > 0) {
+            // Aplica a mesma blindagem de hierarquia no fallback
+            foundData = dataUids.find(d => String(d.role).toLowerCase().trim() === "master") || dataUids[0];
+          }
         }
 
         if (foundData) {
+          // Garante que a palavra "master" não tenha espaços ocultos ou maiúsculas erradas
+          const safeRole = String(foundData.role || "aluno").toLowerCase().trim();
+
           const mappedProfile: UserProfile = {
             id: foundData.id,
             uid: foundData.uid || firebaseUser.uid,
             email: foundData.email,
             displayName: foundData.display_name,
             codigo: foundData.codigo,
-            role: foundData.role,
+            role: safeRole as any,
             franquiaId: foundData.franquia_id,
             turma: foundData.turma,
             xp: foundData.xp || 0,
@@ -77,7 +88,7 @@ export function useAuth() {
 
           setProfile(mappedProfile);
           document.cookie = `user_uid=${firebaseUser.uid}; path=/; max-age=86400; SameSite=None; Secure`;
-          document.cookie = `user_role=${mappedProfile.role}; path=/; max-age=86400; SameSite=None; Secure`;
+          document.cookie = `user_role=${safeRole}; path=/; max-age=86400; SameSite=None; Secure`;
         } else {
           console.warn("Nenhum perfil encontrado no Supabase para:", firebaseUser.email);
           setProfile(null);
