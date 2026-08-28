@@ -567,13 +567,12 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
-  // 🔥 O ATAQUE "SNIPER" - Busca Indivídual Sem Limites de Paginação 🔥
+  // 🔥 RECÁLCULO GLOBAL V3 - FORÇA BRUTA COM RECIBO DE CONFIRMAÇÃO DO BANCO 🔥
   const handleGlobalXPSync = async () => {
-    if (!confirm("ATENÇÃO: Isso irá varrer aluno por aluno e recalcular o saldo de XP com precisão cirúrgica. Deseja continuar?")) return;
+    if (!confirm("ATENÇÃO: Este processo fará o recálculo forçado da XP. Deseja iniciar?")) return;
     
     setLoading(true);
     try {
-      // 1. Pega os 477 usuários
       let allUsers: any[] = [];
       let uPage = 0;
       let uHasMore = true;
@@ -595,7 +594,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
       }
 
       let successCount = 0;
-      const concurrency = 10; // Processa 10 alunos por vez para não sobrecarregar o navegador
+      const concurrency = 10; 
 
       for (let i = 0; i < allUsers.length; i += concurrency) {
         const chunk = allUsers.slice(i, i + concurrency);
@@ -603,14 +602,12 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         await Promise.all(chunk.map(async (u) => {
           const mainId = String(u.id).trim();
           
-          // Cria uma "Rede" com todos os IDs que esse aluno já usou na vida
           const possibleIds = Array.from(new Set([
             mainId,
             u.uid ? String(u.uid).trim() : '',
             u.codigo && u.franquia_id ? `${String(u.franquia_id).trim()}_${String(u.codigo).trim()}` : ''
           ].filter(Boolean)));
 
-          // Faz um ataque direto (Index Seek) pedindo só as missões desses IDs exatos
           const { data: missions } = await supabase
             .from('missoes')
             .select('status, xp_awarded')
@@ -623,7 +620,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
               const st = String(m.status || "").toLowerCase().trim();
               if (['approved', 'bonus', 'aprovado', 'aprovada', 'concluido'].includes(st)) {
                 let xp = Number(m.xp_awarded);
-                // Força o valor correto caso o banco legou "0"
                 if (isNaN(xp) || xp === 0) {
                   xp = (st === 'bonus') ? XP_BONUS : XP_PER_MISSION;
                 }
@@ -632,13 +628,24 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             });
           }
 
-          // Atualiza o aluno (Até quem não tem missão é atualizado para garantir a limpeza do banco)
-          const { error } = await supabase.from('usuarios').update({ xp: totalXp }).eq('id', mainId);
-          if (!error) successCount++;
+          // EXIGE RECIBO DE CONFIRMAÇÃO DO SUPABASE USANDO .select('id').single()
+          const { data: updatedUser, error } = await supabase
+            .from('usuarios')
+            .update({ xp: totalXp })
+            .eq('id', mainId)
+            .select('id') 
+            .single();
+
+          if (!error && updatedUser) {
+             successCount++;
+          } else if (error) {
+             console.error(`Falha ao gravar no ID ${mainId}:`, error.message);
+          }
         }));
       }
 
-      alert(`Sincronização Cirúrgica concluída! O Saldo de XP de ${successCount} alunos foi corrigido com 100% de precisão.`);
+      // NOVO ALERTA PARA CONFIRMAR QUE ESTA VERSÃO ESTÁ RODANDO NO NAVEGADOR
+      alert(`✅ SUCESSO ABSOLUTO (V3)! A XP de ${successCount} alunos foi matematicamente reconstruída e confirmada pelo banco de dados.`);
       
       fetchCounts();
       fetchUsers(true); 
