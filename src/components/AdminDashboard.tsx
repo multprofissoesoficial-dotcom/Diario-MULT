@@ -1354,6 +1354,74 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             </motion.div>
           </div>
         )}
+        {selectedMissionForView && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="glass-card w-full max-w-2xl p-6 sm:p-8 space-y-6 relative"
+            >
+              <button 
+                onClick={() => setSelectedMissionForView(null)} 
+                className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
+              >
+                <XCircle className="w-6 h-6" />
+              </button>
+              
+              <div className="space-y-2 pr-8">
+                <h2 className="text-xl sm:text-2xl font-black tracking-tighter flex items-center gap-3 uppercase">
+                  <Search className="text-neon-blue w-6 h-6 shrink-0" /> REVISAR <span className="text-mult-orange">MISSÃO</span>
+                </h2>
+                <p className="text-[10px] sm:text-xs text-gray-500 font-bold uppercase tracking-widest">
+                  Aluno: <span className="text-white">{selectedMissionForView.studentName}</span> | Atividade: <span className="text-white">{getRelativeLesson(selectedMissionForView.classNum).label}</span>
+                </p>
+              </div>
+
+              <div className="bg-black/40 border border-white/10 rounded-xl p-5 shadow-inner min-h-[120px] sm:min-h-[150px]">
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                  <FileText className="w-3 h-3" /> Conteúdo Enviado:
+                </p>
+                <p className="text-gray-300 italic whitespace-pre-wrap leading-relaxed text-sm sm:text-base">
+                  "{selectedMissionForView.content}"
+                </p>
+              </div>
+
+              {selectedMissionForView.status === "pending" ? (
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 pt-2">
+                  <button 
+                    disabled={loading}
+                    onClick={() => handleRejectMission(selectedMissionForView)}
+                    className="flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 font-black py-3 sm:py-4 rounded-xl transition-all disabled:opacity-50 uppercase tracking-widest text-[10px] sm:text-xs flex items-center justify-center gap-2"
+                  >
+                    <XCircle className="w-4 h-4 shrink-0" /> REJEITAR
+                  </button>
+                  <button 
+                    disabled={loading}
+                    onClick={() => handleApproveMission(selectedMissionForView, false)}
+                    className="flex-1 bg-green-500/20 hover:bg-green-500/30 text-green-400 border border-green-500/40 font-black py-3 sm:py-4 rounded-xl transition-all disabled:opacity-50 uppercase tracking-widest text-[10px] sm:text-xs flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle className="w-4 h-4 shrink-0" /> APROVAR (+{XP_PER_MISSION} XP)
+                  </button>
+                  <button 
+                    disabled={loading}
+                    onClick={() => handleApproveMission(selectedMissionForView, true)}
+                    className="flex-1 bg-neon-blue hover:bg-neon-blue/90 text-black font-black py-3 sm:py-4 rounded-xl transition-all neon-glow-blue disabled:opacity-50 uppercase tracking-widest text-[10px] sm:text-xs flex items-center justify-center gap-2"
+                  >
+                    <Zap className="w-4 h-4 shrink-0" /> BÔNUS (+{XP_BONUS} XP)
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center p-6 border border-white/10 rounded-xl bg-white/5">
+                  <CheckCircle2 className="w-8 h-8 text-gray-500 mb-2" />
+                  <p className="text-[10px] sm:text-xs font-bold text-gray-400 uppercase tracking-widest text-center">
+                    Esta missão já foi avaliada ({selectedMissionForView.status})
+                  </p>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
       </AnimatePresence>
     </div>
   );
