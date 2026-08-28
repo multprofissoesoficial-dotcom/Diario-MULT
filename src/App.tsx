@@ -7,7 +7,7 @@ import TeacherDashboard from "./components/TeacherDashboard";
 import AdminDashboard from "./components/AdminDashboard";
 import CourseLobby from "./components/CourseLobby";
 import { motion, AnimatePresence } from "motion/react";
-import { Rocket, LogOut, AlertTriangle } from "lucide-react";
+import { Rocket, LogOut } from "lucide-react";
 import { auth } from "./firebase";
 import { supabase } from "./lib/supabase";
 import { useState, useEffect } from "react";
@@ -18,23 +18,12 @@ export default function App() {
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [showLobby, setShowLobby] = useState(false);
 
-  // 🔥 BLINDAGEM MÁXIMA BASEADA NO NOME (PROVA VISUAL) 🔥
-  // Como a verificação por e-mail falhou, usamos o displayName que o print prova estar funcionando.
-  const isDirectorByName = profile?.displayName?.toLowerCase().includes("fausto") || 
-                           profile?.displayName?.toLowerCase().includes("selane") ||
-                           profile?.email?.toLowerCase().includes("faustodv@gmail.com") ||
-                           profile?.email?.toLowerCase().includes("selane@mult.com.br");
-
-  // Força o cargo master se identificar seu nome ou e-mail
-  const effectiveRole = isDirectorByName ? "master" : profile?.role;
-
   useEffect(() => {
     let isMounted = true;
 
     async function fetchEnrollments() {
-      // Usa a effectiveRole blindada para garantir que o Master não baixe coisas de aluno
-      if (user && effectiveRole === "aluno") {
-        const targetId = profile!.id;
+      if (user && profile?.role === "aluno") {
+        const targetId = profile.id;
         
         try {
           const { data, error } = await supabase
@@ -57,9 +46,9 @@ export default function App() {
             
             setEnrollments(list);
 
-            if (list.length > 1 && !profile!.currentCourseId) {
+            if (list.length > 1 && !profile.currentCourseId) {
               setShowLobby(true);
-            } else if (list.length === 1 && !profile!.currentCourseId) {
+            } else if (list.length === 1 && !profile.currentCourseId) {
               await supabase
                 .from("usuarios")
                 .update({ current_course_id: list[0].courseId })
@@ -80,7 +69,7 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, [user, effectiveRole, profile?.currentCourseId, profile?.id]);
+  }, [user, profile?.role, profile?.currentCourseId, profile?.id]);
 
   if (loading) {
     return (
@@ -102,25 +91,8 @@ export default function App() {
     );
   }
 
-  // Clona o perfil com o cargo forçado e seguro para repassar aos painéis
-  const safeProfile = profile ? { ...profile, role: effectiveRole as any } : null;
-
   return (
     <div className="min-h-screen bg-cockpit-bg selection:bg-neon-blue selection:text-black">
-      
-      {/* CAIXA PRETA DE DEBUG PARA INVESTIGAÇÃO (Só aparece logado) */}
-      {user && (
-        <div className="bg-red-900/50 border-b border-red-500 text-white p-2 text-[10px] font-mono flex flex-wrap gap-4 justify-center z-50 relative">
-          <span className="flex items-center gap-1 font-bold text-red-300">
-            <AlertTriangle className="w-3 h-3"/> MODO INVESTIGAÇÃO ATIVO
-          </span>
-          <span><strong>Email Autenticado:</strong> {user.email || "VAZIO"}</span>
-          <span><strong>UID Firebase:</strong> {user.uid}</span>
-          <span><strong>Cargo Real no Banco:</strong> {profile?.role || "VAZIO"}</span>
-          <span><strong>Cargo Forçado na Tela:</strong> {effectiveRole}</span>
-        </div>
-      )}
-
       <AnimatePresence mode="wait">
         {!user ? (
           <motion.div 
@@ -131,27 +103,27 @@ export default function App() {
           >
             <Auth onSeedClick={() => {}} />
           </motion.div>
-        ) : safeProfile ? (
+        ) : profile ? (
           <motion.div 
             key="dashboard"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            {effectiveRole === "aluno" ? (
+            {profile.role === "aluno" ? (
               showLobby ? (
                 <CourseLobby 
-                  profile={safeProfile} 
+                  profile={profile} 
                   enrollments={enrollments} 
                   onSelect={() => setShowLobby(false)} 
                 />
               ) : (
-                <StudentDashboard profile={safeProfile} />
+                <StudentDashboard profile={profile} />
               )
-            ) : effectiveRole === "professor" ? (
-              <TeacherDashboard profile={safeProfile} />
+            ) : profile.role === "professor" ? (
+              <TeacherDashboard profile={profile} />
             ) : (
-              <AdminDashboard profile={safeProfile} />
+              <AdminDashboard profile={profile} />
             )}
           </motion.div>
         ) : (
@@ -166,27 +138,14 @@ export default function App() {
                   <p className="text-gray-400 text-sm">
                     Sua conta de acesso existe, mas seu perfil de aluno/colaborador não foi encontrado no banco de dados.
                   </p>
-                  <p className="text-[10px] text-red-400/60 uppercase tracking-widest font-bold">
-                    Verifique o Console (F12) para detalhes técnicos.
-                  </p>
                 </div>
-                
-                <div className="bg-black/40 p-4 rounded-xl border border-white/5 text-left space-y-2">
-                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Dados Técnicos</p>
-                  <p className="text-[10px] font-mono text-gray-400 break-all">UID: {user.uid}</p>
-                  <p className="text-[10px] font-mono text-gray-400 break-all">E-mail: {user.email}</p>
-                </div>
-
-                <p className="text-gray-500 text-[10px] italic uppercase tracking-widest">
-                  Informe os dados acima ao seu Coordenador para regularizar seu acesso.
-                </p>
+                <button 
+                  onClick={() => auth.signOut()}
+                  className="w-full py-4 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl border border-white/10 transition-all uppercase tracking-widest text-xs flex items-center justify-center gap-2"
+                >
+                  <LogOut className="w-4 h-4" /> VOLTAR AO LOGIN
+                </button>
               </div>
-              <button 
-                onClick={() => auth.signOut()}
-                className="w-full py-4 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl border border-white/10 transition-all uppercase tracking-widest text-xs flex items-center justify-center gap-2"
-              >
-                <LogOut className="w-4 h-4" /> VOLTAR AO LOGIN
-              </button>
             </div>
           </div>
         )}
