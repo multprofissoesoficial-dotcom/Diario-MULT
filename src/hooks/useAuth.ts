@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useState } from "react";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth } from "../firebase";
@@ -26,7 +28,7 @@ export function useAuth() {
         const userEmail = (firebaseUser.email || "").toLowerCase().trim();
         let foundData = null;
 
-        // 1. Busca Otimizada em Array: Traz TODOS os registros vinculados ao e-mail
+        // 1. Busca Array: Varre o banco em busca de TODAS as contas com este e-mail
         if (userEmail) {
           const { data: dataEmails, error: emailError } = await supabase
             .from("usuarios")
@@ -34,18 +36,16 @@ export function useAuth() {
             .ilike("email", userEmail);
 
           if (dataEmails && dataEmails.length > 0) {
-            // BLINDAGEM MÁXIMA DE HIERARQUIA: 
-            // Se houver perfis duplicados (ex: importou o master como aluno sem querer),
-            // o sistema varre a lista e FORÇA o login na conta com o cargo mais alto.
+            // Varre perfis duplicados e sempre assume a maior hierarquia disponível
             foundData = dataEmails.find(d => String(d.role).toLowerCase().trim() === "master")
                      || dataEmails.find(d => String(d.role).toLowerCase().trim() === "coordenador")
                      || dataEmails.find(d => String(d.role).toLowerCase().trim() === "rh")
                      || dataEmails.find(d => String(d.role).toLowerCase().trim() === "professor")
-                     || dataEmails[0]; // Se só houver aluno, entra como aluno
+                     || dataEmails[0]; 
           }
         }
 
-        // 2. Fallback: Tenta por UID do Firebase caso o e-mail não seja encontrado
+        // 2. Fallback: UID Seguro
         if (!foundData && firebaseUser.uid) {
           const { data: dataUids } = await supabase
             .from("usuarios")
@@ -53,14 +53,19 @@ export function useAuth() {
             .or(`uid.eq.${firebaseUser.uid},id.eq.${firebaseUser.uid}`);
 
           if (dataUids && dataUids.length > 0) {
-            // Aplica a mesma blindagem de hierarquia no fallback
             foundData = dataUids.find(d => String(d.role).toLowerCase().trim() === "master") || dataUids[0];
           }
         }
 
         if (foundData) {
-          // Garante que a palavra "master" não tenha espaços ocultos ou maiúsculas erradas
-          const safeRole = String(foundData.role || "aluno").toLowerCase().trim();
+          let safeRole = String(foundData.role || "aluno").toLowerCase().trim();
+
+          // 🔥 CHAVE MESTRA ABSOLUTA (MASTER KEY) 🔥
+          // Garante que a diretoria NUNCA seja rebaixada a aluno por erros de cache ou banco
+          const masterEmails = ["faustodv@gmail.com", "selane@mult.com.br"];
+          if (masterEmails.includes(userEmail)) {
+            safeRole = "master";
+          }
 
           const mappedProfile: UserProfile = {
             id: foundData.id,
@@ -87,6 +92,7 @@ export function useAuth() {
           };
 
           setProfile(mappedProfile);
+          // Força a reescrita do cookie com o cargo correto para matar o cache fantasma
           document.cookie = `user_uid=${firebaseUser.uid}; path=/; max-age=86400; SameSite=None; Secure`;
           document.cookie = `user_role=${safeRole}; path=/; max-age=86400; SameSite=None; Secure`;
         } else {
