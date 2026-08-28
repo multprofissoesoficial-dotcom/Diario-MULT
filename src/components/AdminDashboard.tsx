@@ -90,12 +90,10 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [activityStatusFilter, setActivityStatusFilter] = useState<string>("all");
   const [resolvedUsers, setResolvedUsers] = useState<Record<string, UserProfile>>({});
 
-  // Backup e Carga Supabase
   const [backupLoading, setBackupLoading] = useState(false);
   const [importingToSupabase, setImportingToSupabase] = useState(false);
   const [supabaseImportReport, setSupabaseImportReport] = useState<any>(null);
 
-  // Global Counts
   const [counts, setCounts] = useState({
     users: { total: 0, aluno: 0, professor: 0, coordenador: 0, rh: 0, pending: 0, active: 0 },
     missions: { total: 0, pending: 0, approved: 0, bonus: 0 },
@@ -104,7 +102,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
   const [selectedMissionForView, setSelectedMissionForView] = useState<Mission | null>(null);
   
-  // Form states para Cadastro Individual
   const [newUser, setNewUser] = useState({
     nome: "",
     email: "",
@@ -118,7 +115,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
   const [successMsg, setSuccessMsg] = useState("");
   const [turmas, setTurmas] = useState<string[]>([]);
 
-  // 1. Carregar Franquias e Cursos do Supabase
   useEffect(() => {
     const fetchBaseData = async () => {
       const { data: frs } = await supabase.from("franquias").select("*").order("nome");
@@ -130,7 +126,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     fetchBaseData();
   }, []);
 
-  // 2. Carregar Turmas Únicas do Supabase
   useEffect(() => {
     const fetchTurmas = async () => {
       let query = supabase.from("usuarios").select("turma").not("turma", "is", null);
@@ -149,7 +144,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     fetchTurmas();
   }, [selectedFranquia, profile.franquiaId, profile.role]);
 
-  // 3. Contadores Globais via Supabase
   useEffect(() => {
     fetchCounts();
   }, [selectedFranquia, profile.franquiaId, profile.role]);
@@ -199,7 +193,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
-  // 4. Buscar Usuários via Supabase
   useEffect(() => {
     setPage(0);
     fetchUsers(true);
@@ -275,7 +268,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
-  // 5. Buscar Missões via Supabase
   useEffect(() => {
     setMissionsPage(0);
     fetchMissions(true);
@@ -339,7 +331,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
-  // 6. Aprovação / Rejeição de Missões
   const handleApproveMission = async (mission: Mission, bonus: boolean) => {
     setLoading(true);
     const xp = bonus ? XP_BONUS : XP_PER_MISSION;
@@ -388,7 +379,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
-  // 7. Cadastro Individual de Usuário (Integrado à API/Supabase)
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUser.nome || !newUser.senha) {
@@ -405,7 +395,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
     try {
       const token = await auth.currentUser?.getIdToken();
-      // Reutiliza a rota de importação ou endpoint equivalente adaptado para usuário único
       const response = await fetch("/api/users/create", {
         method: "POST",
         headers: { 
@@ -444,7 +433,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
-  // Funcionalidade de Importação em Lotes por CSV
   const handlePreviewImport = () => {
     if (!importText.trim()) return;
     const results = Papa.parse(importText, { 
@@ -537,7 +525,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
-  // Carga do Backup no Supabase
   const handleUploadBackupToSupabase = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -578,7 +565,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
 
   return (
     <div className="max-w-7xl mx-auto p-6 md:p-10 space-y-10">
-      {/* Header */}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div className="flex items-center justify-between w-full md:w-auto">
           <div>
@@ -611,7 +597,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         </div>
       </header>
 
-      {/* Tabs */}
       <div className="flex items-center gap-2 p-1 bg-white/5 rounded-2xl w-fit border border-white/5">
         {profile.role !== "rh" && (
           <>
@@ -670,7 +655,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         )}
       </div>
 
-      {/* Stats Cards & Controls */}
       <div className="flex flex-col gap-6">
         <div className="glass-card p-5 sm:p-6 flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6 w-full md:w-auto">
@@ -854,7 +838,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         ) : null}
       </div>
 
-      {/* Conteúdo das Abas */}
       {activeTab === "ats" ? (
         <AtsDashboard profile={profile} />
       ) : activeTab === "users" ? (
@@ -1063,7 +1046,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         <CourseManager courses={courses} />
       ) : activeTab === "maintenance" ? (
         <div className="space-y-8">
-          {/* Módulo de Carga no Supabase */}
           <div className="glass-card p-8 border-neon-blue/20 bg-neon-blue/5">
             <div className="flex items-start gap-6">
               <div className="w-16 h-16 rounded-2xl bg-neon-blue/20 flex items-center justify-center text-neon-blue shrink-0 border border-neon-blue/30">
@@ -1116,7 +1098,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         </div>
       ) : null}
 
-      {/* Modals: Novo Usuário e Importação CSV */}
       <AnimatePresence>
         {showAddUser && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
@@ -1354,6 +1335,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
             </motion.div>
           </div>
         )}
+
         {/* MODAL 1: REVISAR MISSÃO E DAR XP (DA LUPA) */}
         {selectedMissionForView && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
@@ -1451,9 +1433,6 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         )}
 
       </AnimatePresence>
-    </div>
-  );
-}      </AnimatePresence>
     </div>
   );
 }
