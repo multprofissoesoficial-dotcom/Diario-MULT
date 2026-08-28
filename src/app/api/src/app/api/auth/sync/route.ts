@@ -21,35 +21,44 @@ export async function POST(request: Request) {
         decodedToken = await adminAuth.verifyIdToken(token);
       }
     } catch (error) {
-      return NextResponse.json({ error: "Token inválido" }, { status: 401 });
+      console.warn("Aviso de verificação de token:", error);
     }
 
-    const emailToCheck = decodedToken?.email || (await request.json()).email;
+    const body = await request.json().catch(() => ({}));
+    const emailToCheck = decodedToken?.email || body.email;
+
     if (!emailToCheck) {
-      return NextResponse.json({ error: "E-mail não fornecido" }, { status: 400 });
+      return NextResponse.json({ error: "E-mail não fornecido na requisição" }, { status: 400 });
     }
 
-    // Busca o usuário no Supabase usando o Admin Client (ignora RLS e busca insensível a maiúsculas)
+    const cleanInputEmail = String(emailToCheck).toLowerCase().trim();
+
+    // Busca todos os usuários usando o Admin Client (ignora RLS)
     const { data: users, error } = await supabaseAdmin
       .from("usuarios")
       .select("*");
 
     if (error) {
-      console.error("Erro ao buscar usuários no Supabase Admin:", error);
+      console.error("Erro ao buscar usuários no Supabase:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const matchedUser = (users || []).find(
-      (u: any) => u.email && u.email.toLowerCase().trim() === emailToCheck.toLowerCase().trim()
-    );
+    // Procura o usuário ignorando maiúsculas, minúsculas e espaços em branco
+    const matchedUser = (users || []).find((u: any) => {
+      if (!u.email) return false;
+      return String(u.email).toLowerCase().trim() === cleanInputEmail;
+    });
 
     if (!matchedUser) {
-      return NextResponse.json({ error: "Perfil não encontrado no banco de dados." }, { status: 404 });
+      console.warn(`[SYNC] Perfil não encontrado para o e-mail: "${cleanInputEmail}"`);
+      return NextResponse.json({ 
+        error: `Perfil não encontrado para o e-mail: ${emailToCheck}` 
+      }, { status: 404 });
     }
 
-    return NextResponse.json({ profile: matchedUser });
+    return NextResponse.json({ success: true, profile: matchedUser });
   } catch (err: any) {
-    console.error("Erro na API de sync:", err);
+    console.error("Erro crítico na API de sync:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
