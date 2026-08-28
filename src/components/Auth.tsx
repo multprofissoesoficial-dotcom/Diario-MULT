@@ -23,6 +23,7 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
   const [authError, setAuthError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // 1. Monitorar Sessão e Buscar no Supabase Diretamente
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
       if (!firebaseUser) {
@@ -35,51 +36,62 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
       setUser(firebaseUser);
       
       try {
-        const token = await firebaseUser.getIdToken();
-        const res = await fetch("/api/auth/sync", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
-          },
-          body: JSON.stringify({ email: firebaseUser.email, uid: firebaseUser.uid })
-        });
+        const userEmail = (firebaseUser.email || "").toLowerCase().trim();
+        let foundData = null;
 
-        const result = await res.json();
+        // Busca por e-mail insensível a maiúsculas/minúsculas diretamente no Supabase
+        const { data: usersList, error: queryError } = await supabase
+          .from("usuarios")
+          .select("*");
 
-        if (!res.ok || !result.profile) {
-          throw new Error(result.error || "Perfil não encontrado.");
+        if (!queryError && usersList) {
+          foundData = usersList.find((u: any) => u.email && u.email.toLowerCase().trim() === userEmail);
         }
 
-        const foundData = result.profile;
-        const mappedProfile: UserProfile = {
-          id: foundData.id,
-          uid: foundData.uid || firebaseUser.uid,
-          email: foundData.email,
-          displayName: foundData.display_name,
-          codigo: foundData.codigo,
-          role: foundData.role,
-          franquiaId: foundData.franquia_id,
-          turma: foundData.turma,
-          xp: foundData.xp || 0,
-          skills: foundData.skills || [],
-          resumeUrl: foundData.resume_url,
-          availabilityStatus: foundData.availability_status,
-          withdrawalReason: foundData.withdrawal_reason,
-          unlockedBadges: foundData.unlocked_badges || [],
-          currentCourseId: foundData.current_course_id || "INF",
-          atsTermsAccepted: Boolean(foundData.ats_terms_accepted),
-          atsTermsAcceptedAt: foundData.ats_terms_accepted_at,
-          perceptions: foundData.perceptions || {},
-          employmentHistory: foundData.employment_history || [],
-          createdAt: foundData.created_at,
-          lastLogin: foundData.last_login
-        };
-        setProfile(mappedProfile);
-        setAuthError("");
+        // Se não achou por e-mail, tenta por UID
+        if (!foundData && firebaseUser.uid) {
+          const { data: dataUid } = await supabase
+            .from("usuarios")
+            .select("*")
+            .or(`uid.eq.${firebaseUser.uid},id.eq.${firebaseUser.uid}`)
+            .maybeSingle();
+
+          if (dataUid) foundData = dataUid;
+        }
+
+        if (foundData) {
+          const mappedProfile: UserProfile = {
+            id: foundData.id,
+            uid: foundData.uid || firebaseUser.uid,
+            email: foundData.email,
+            displayName: foundData.display_name,
+            codigo: foundData.codigo,
+            role: foundData.role,
+            franquiaId: foundData.franquia_id,
+            turma: foundData.turma,
+            xp: foundData.xp || 0,
+            skills: foundData.skills || [],
+            resumeUrl: foundData.resume_url,
+            availabilityStatus: foundData.availability_status,
+            withdrawalReason: foundData.withdrawal_reason,
+            unlockedBadges: foundData.unlocked_badges || [],
+            currentCourseId: foundData.current_course_id || "INF",
+            atsTermsAccepted: Boolean(foundData.ats_terms_accepted),
+            atsTermsAcceptedAt: foundData.ats_terms_accepted_at,
+            perceptions: foundData.perceptions || {},
+            employmentHistory: foundData.employment_history || [],
+            createdAt: foundData.created_at,
+            lastLogin: foundData.last_login
+          };
+          setProfile(mappedProfile);
+          setAuthError("");
+        } else {
+          setAuthError(`Perfil não encontrado no Supabase para: ${firebaseUser.email}`);
+          setProfile(null);
+        }
       } catch (err: any) {
-        console.error("Erro ao sincronizar perfil:", err);
-        setAuthError(`Erro ao carregar perfil para: ${firebaseUser.email}`);
+        console.error("Erro ao buscar perfil:", err);
+        setAuthError("Erro ao carregar dados do perfil.");
         setProfile(null);
       } finally {
         setLoading(false);
@@ -98,6 +110,7 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
       let inputVal = email.trim();
       let targetEmail = inputVal.toLowerCase();
       
+      // Se digitou apenas números (matrícula do aluno), busca o e-mail real correspondente no Supabase
       if (/^\d+$/.test(inputVal)) {
         const { data: userRecord, error: searchError } = await supabase
           .from("usuarios")
