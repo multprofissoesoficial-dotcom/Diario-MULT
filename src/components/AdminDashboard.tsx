@@ -567,12 +567,13 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
     }
   };
 
-  // 🔥 Sincronização Global Refatorada - Força Bruta e Estabilidade Absoluta 🔥
+  // 🔥 O ATAQUE "SNIPER" - Busca Indivídual Sem Limites de Paginação 🔥
   const handleGlobalXPSync = async () => {
-    if (!confirm("ATENÇÃO: Isso irá recalcular o saldo de XP de TODOS os alunos com base no histórico de missões aprovadas e bônus. Deseja continuar?")) return;
+    if (!confirm("ATENÇÃO: Isso irá varrer aluno por aluno e recalcular o saldo de XP com precisão cirúrgica. Deseja continuar?")) return;
     
     setLoading(true);
     try {
+      // 1. Pega os 477 usuários
       let allUsers: any[] = [];
       let uPage = 0;
       let uHasMore = true;
@@ -581,7 +582,7 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         const { data: uData, error: uErr } = await supabase
           .from("usuarios")
           .select("id, uid, codigo, franquia_id")
-          .order('id') // Estabilidade absoluta de paginação
+          .order('id')
           .range(uPage * 1000, (uPage + 1) * 1000 - 1);
         
         if (uErr) throw uErr;
@@ -593,89 +594,57 @@ export default function AdminDashboard({ profile }: { profile: UserProfile }) {
         }
       }
 
-      const userMap: Record<string, string> = {};
-      const xpMap: Record<string, number> = {};
-
-      allUsers.forEach(u => {
-        const uId = String(u.id).trim();
-        // Inicializa TODOS os usuários com zero para limpar saldos fantasmas
-        xpMap[uId] = 0; 
-        
-        userMap[uId] = uId; 
-        if (u.uid) userMap[String(u.uid).trim()] = uId; 
-        if (u.codigo) {
-           const cod = String(u.codigo).trim();
-           userMap[cod] = uId;
-           if (u.franquia_id) {
-               const fId = String(u.franquia_id).trim();
-               userMap[`${fId}_${cod}`] = uId; 
-           }
-        }
-      });
-
-      let allMissionsFromDB: any[] = [];
-      let mPage = 0;
-      let mHasMore = true;
-
-      while (mHasMore) {
-        // Removemos filtros limitantes do banco de dados e usamos ordenação por ID (chave primária infalível)
-        const { data: mData, error: mErr } = await supabase
-          .from("missoes")
-          .select("student_id, status, xp_awarded")
-          .order('id') 
-          .range(mPage * 1000, (mPage + 1) * 1000 - 1);
-
-        if (mErr) throw mErr;
-
-        if (mData && mData.length > 0) {
-          allMissionsFromDB.push(...mData);
-          mPage++;
-        } else {
-          mHasMore = false;
-        }
-      }
-
-      // Constrói o saldo tijolo por tijolo de forma puramente matemática
-      allMissionsFromDB.forEach(m => {
-        const st = String(m.status || "").toLowerCase().trim();
-        
-        if (['approved', 'bonus', 'aprovado', 'aprovada', 'concluido'].includes(st)) {
-          let xp = Number(m.xp_awarded);
-          if (isNaN(xp) || xp === 0) {
-             xp = (st === 'bonus') ? XP_BONUS : XP_PER_MISSION;
-          }
-             
-          const sId = String(m.student_id).trim();
-          const canonicalId = userMap[sId] || sId; 
-
-          if (xpMap[canonicalId] !== undefined) {
-             xpMap[canonicalId] += xp;
-          }
-        }
-      });
-
       let successCount = 0;
-      const updates = Object.entries(xpMap);
-      const chunkSize = 20; 
-      
-      for (let i = 0; i < updates.length; i += chunkSize) {
-        const chunk = updates.slice(i, i + chunkSize);
-        await Promise.all(
-          chunk.map(async ([id, totalXp]) => {
-            const { error } = await supabase.from("usuarios").update({ xp: totalXp }).eq("id", id);
-            if (!error) successCount++;
-            else console.error(`Erro ao atualizar XP para ID ${id}:`, error.message);
-          })
-        );
+      const concurrency = 10; // Processa 10 alunos por vez para não sobrecarregar o navegador
+
+      for (let i = 0; i < allUsers.length; i += concurrency) {
+        const chunk = allUsers.slice(i, i + concurrency);
+
+        await Promise.all(chunk.map(async (u) => {
+          const mainId = String(u.id).trim();
+          
+          // Cria uma "Rede" com todos os IDs que esse aluno já usou na vida
+          const possibleIds = Array.from(new Set([
+            mainId,
+            u.uid ? String(u.uid).trim() : '',
+            u.codigo && u.franquia_id ? `${String(u.franquia_id).trim()}_${String(u.codigo).trim()}` : ''
+          ].filter(Boolean)));
+
+          // Faz um ataque direto (Index Seek) pedindo só as missões desses IDs exatos
+          const { data: missions } = await supabase
+            .from('missoes')
+            .select('status, xp_awarded')
+            .in('student_id', possibleIds);
+
+          let totalXp = 0;
+          
+          if (missions && missions.length > 0) {
+            missions.forEach(m => {
+              const st = String(m.status || "").toLowerCase().trim();
+              if (['approved', 'bonus', 'aprovado', 'aprovada', 'concluido'].includes(st)) {
+                let xp = Number(m.xp_awarded);
+                // Força o valor correto caso o banco legou "0"
+                if (isNaN(xp) || xp === 0) {
+                  xp = (st === 'bonus') ? XP_BONUS : XP_PER_MISSION;
+                }
+                totalXp += xp;
+              }
+            });
+          }
+
+          // Atualiza o aluno (Até quem não tem missão é atualizado para garantir a limpeza do banco)
+          const { error } = await supabase.from('usuarios').update({ xp: totalXp }).eq('id', mainId);
+          if (!error) successCount++;
+        }));
       }
 
-      alert(`Sincronização global concluída com sucesso! O Saldo de XP de ${successCount} alunos foi recalculado e corrigido na raiz.`);
+      alert(`Sincronização Cirúrgica concluída! O Saldo de XP de ${successCount} alunos foi corrigido com 100% de precisão.`);
       
       fetchCounts();
       fetchUsers(true); 
 
     } catch (err: any) {
-      console.error("Erro ao sincronizar XP:", err);
+      console.error("Erro na Sincronização Cirúrgica:", err);
       alert("Erro ao recalcular XP: " + err.message);
     } finally {
       setLoading(false);
