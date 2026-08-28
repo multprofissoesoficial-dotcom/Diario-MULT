@@ -23,6 +23,7 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
   const [authError, setAuthError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // 1. Monitorar Sessão do Firebase Auth e Buscar Perfil no Supabase em Cascata Segura
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
       setUser(firebaseUser);
@@ -30,22 +31,37 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
         try {
           let foundData = null;
 
-          const { data: dataUid } = await supabase
-            .from("usuarios")
-            .select("*")
-            .or(`uid.eq.${firebaseUser.uid},id.eq.${firebaseUser.uid}`)
-            .maybeSingle();
+          // Passo A: Tenta buscar pelo UID exato do Firebase
+          if (firebaseUser.uid) {
+            const { data: dataUid } = await supabase
+              .from("usuarios")
+              .select("*")
+              .eq("uid", firebaseUser.uid)
+              .maybeSingle();
 
-          if (dataUid) {
-            foundData = dataUid;
-          } else if (firebaseUser.email) {
+            if (dataUid) foundData = dataUid;
+          }
+
+          // Passo B: Se não achou, tenta buscar pelo ID exato igual ao UID
+          if (!foundData && firebaseUser.uid) {
+            const { data: dataId } = await supabase
+              .from("usuarios")
+              .select("*")
+              .eq("id", firebaseUser.uid)
+              .maybeSingle();
+
+            if (dataId) foundData = dataId;
+          }
+
+          // Passo C: Se ainda não achou, busca pelo e-mail exato normalizado
+          if (!foundData && firebaseUser.email) {
             const { data: dataEmail } = await supabase
               .from("usuarios")
               .select("*")
               .ilike("email", firebaseUser.email.trim())
               .maybeSingle();
 
-            foundData = dataEmail;
+            if (dataEmail) foundData = dataEmail;
           }
 
           if (foundData) {
@@ -74,7 +90,8 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
             };
             setProfile(mappedProfile);
           } else {
-            setAuthError("Perfil não encontrado no banco de dados do Supabase para esta conta.");
+            console.error("Perfil não localizado no Supabase para UID:", firebaseUser.uid, "Email:", firebaseUser.email);
+            setAuthError(`Perfil não encontrado no banco de dados para a conta: ${firebaseUser.email}`);
           }
         } catch (err: any) {
           console.error("Erro ao buscar perfil no Supabase:", err);
@@ -98,6 +115,7 @@ export default function Auth({ onSeedClick }: { onSeedClick?: () => void }) {
       let inputVal = email.trim();
       let targetEmail = inputVal.toLowerCase();
       
+      // Se o usuário digitou apenas números (matrícula/código de aluno), busca o e-mail real correspondente no Supabase
       if (/^\d+$/.test(inputVal)) {
         const { data: userRecord, error: searchError } = await supabase
           .from("usuarios")
